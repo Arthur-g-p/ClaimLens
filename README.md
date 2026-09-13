@@ -42,7 +42,7 @@ disagree with.
   justified or unjustified, their cause apportioned between retriever
   and generator, and unanswerable questions (`"gt_answer": ""`) expose
   unwarranted answers — while the metrics stay standard (a refusal is
-  non-delivery; see docs/abstention.md).
+  non-delivery; see docs/ragchecker.md#abstention).
 - **Any OpenAI-compatible endpoint**: point the extractor and checker at
   different models, providers, or local servers independently.
 

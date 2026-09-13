@@ -98,6 +98,15 @@ asserted nothing); the extractor never abstains — it either *recognizes* an
 abstaining response or *misreads* it into invented claims. This differs from
 `ragcheck`, whose abstention judges are about the question.
 
+Abstention detection is a quality of the extractor, until detection
+becomes its own pipeline step. The three rates in the Abstention Handling
+block measure it. `abstention recognized`: a refusal yielded no claims,
+correct. `abstention misread`: a refusal yielded invented claims, charged
+in precision. `answer missed`: a real answer yielded no claims, charged in
+recall. This is independent of ragcheck's abstention handling, which asks
+a different question. Not whether the extractor detected the refusal, but
+whether the system should have refused.
+
 | bucket | GT | predictions | effect |
 | --- | --- | --- | --- |
 | `to_compare` | yes | yes | sent to LLM matching |

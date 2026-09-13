@@ -60,6 +60,19 @@ triplets against the file's triplets in both directions, so each side has to
 find its counterpart. The lessons from the three problem classes above fed
 directly back into the extraction and atomization services.
 
+## What a Contradiction means in this file
+
+These triplets were extracted from responses, not from ground truth
+answers. That decides what a Contradiction label means here: the context
+addresses the subject and the response got it wrong. In ragcheck the
+claims come from the ground truth and are true by contract, so a chunk
+that contradicts one is noise, not evidence, and only Entailment counts as
+relevance. Claims extracted from responses can therefore never test
+retrieval. Any relevance use of this data, such as a retriever check or
+an abstention attribution, must use the Entailment labeled triplets only.
+`eval checker` is unaffected. It compares verdicts to labels and asks
+nothing about relevance.
+
 ## Contents
 
 | file | items | abstentions | triplets | Entailment | Neutral | Contradiction | always-Ent. baseline |

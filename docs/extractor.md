@@ -85,6 +85,19 @@ This enables **resumable runs** — you can re-run extraction on the same file a
 | Refusal with punctuation | `{"response": "I don't know."}` | Abstention → `[]` |
 | Refusal, case-insensitive | `{"response": "I DON'T KNOW"}` | Abstention → `[]` |
 
+An abstention is a response from which no claims are extracted. This is
+how the tool detects a refusal. It works for short refusals and for long
+ones that only say the context is insufficient. Refusals that also state
+facts are not handled yet (docs/ragchecker.md, Known limitations).
+Anything less than full silence is an ordinary answer and is not flagged:
+
+| response | claim level | item level flag |
+| --- | --- | --- |
+| full abstention ("I have no idea") | 0 claims | fires |
+| full answer | claims scored | no |
+| partial answer ("I can answer one part") | partial recall, high precision, measured normally | no |
+| estimate with provenance ("context suggests 600 to 650 ly") | one hedged claim, checked like any other | no |
+
 **How abstention detection works** (`_is_full_abstention`):
 1. Strip, lowercase, remove all punctuation, collapse whitespace.
 2. Check if any known refusal phrase is present in the cleaned text.
@@ -98,6 +111,18 @@ Known refusal phrases:
 - `"not provided in the context"`
 - `"i dont have enough information"`
 - `"information not provided"`
+
+This phrase list is English only and will not scale to other languages.
+It stays because it has no cost and cannot do damage as of now. It fires
+only when a known refusal phrase makes up almost the whole response, so a
+false positive would need a real answer that is 85% refusal phrase, which
+does not happen. Anything it misses falls through to the second path: the
+extractor itself returning no claims, which works in any language. Which
+path fired is stored per item as `abstention_source: "heuristic"` or
+`"llm"` (docs/outcome_markers.md). 
+The extractor cannot know whether its
+detection was right. That is measured by the extractor eval
+(docs/eval_extractor.md, Step 3).
 
 ### Bucket 3: Pending → **sent to LLM**
 

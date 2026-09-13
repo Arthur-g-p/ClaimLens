@@ -432,7 +432,24 @@ def log_mece_tree(
             suffix = f" {entry[3]}" if len(entry) > 3 and entry[3] else ""
             rate = "n/a" if not den else f"{num / den:.3f}"
             parts.append(f"{name} {rate} ({num} / {den}{suffix})")
-        logger.info("     └─ → %s", " · ".join(parts))
+        for line in _wrap_footer(parts):
+            logger.info(line)
+
+
+def _wrap_footer(parts: list[str], width: int = 125) -> list[str]:
+    """Pack footer rates onto lines: `     └─ → a · b`, then `          · c`."""
+    first, cont = "     └─ → ", "          · "
+    lines: list[str] = []
+    current = first + parts[0]
+    for part in parts[1:]:
+        candidate = f"{current} · {part}"
+        if len(candidate) > width:
+            lines.append(current)
+            current = cont + part
+        else:
+            current = candidate
+    lines.append(current)
+    return lines
 
 
 def log_rate_rows(

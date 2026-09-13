@@ -309,7 +309,7 @@ class LLMClient:
             self._rate_limit_last_log = now
             source = " (server Retry-After)" if from_header else ""
             logger.warning(
-                "⏳ Rate limited by %s. Waiting %.0fs%s, then continuing — nothing will be dropped.",
+                "⏳ Rate limited by %s. Waiting %.0fs%s.",
                 self.model, wait, source,
             )
             return

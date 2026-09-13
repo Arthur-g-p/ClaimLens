@@ -66,7 +66,7 @@ class TestValidate:
         assert len(valid) == 1
 
     def test_empty_response_is_an_abstention_not_missing(self, pipeline):
-        """docs/abstention.md §1: "" is a full abstention — kept, flagged later."""
+        """docs/extractor.md, Bucket 2: "" is a full abstention — kept, flagged later."""
         valid = pipeline._validate([_full_item(response=""), _full_item()])
         assert len(valid) == 2
 

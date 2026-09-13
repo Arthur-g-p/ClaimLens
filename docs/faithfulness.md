@@ -87,3 +87,8 @@ list at `--runs 1` too; `--runs N` adds entries and reshapes nothing.
   charged once, in `extraction_error_rate`, never by diluting a behavior
   rate), `extraction_error_rate`, `checker_failure_rate`. There is no
   justified/unjustified abstention split here — that requires ground truth.
+- Whether a refusal was justified cannot be judged here. There is no
+  ground truth to say whether an answer was expected, so `abstained` is a
+  count, not a verdict. An answerability check (could the context have
+  answered the question?) would make it possible. Answerability must be
+  studied first.

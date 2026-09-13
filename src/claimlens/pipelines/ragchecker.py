@@ -54,7 +54,7 @@ REQUIRED_KEYS = ("response", "gt_answer", "retrieved_context")
 def _missing_keys(item: dict) -> list[str]:
     """Required-key check. Absent or null = missing. An empty response is
     data (a full abstention); an explicit "" gt_answer is data (the
-    annotated no-answer convention, docs/abstention.md §2); an empty chunk
+    annotated no-answer convention, docs/ragchecker.md, Input); an empty chunk
     list is not — nothing can be evaluated against no context."""
     missing = [k for k in ("response", "gt_answer")
                if not isinstance(item.get(k), str)]
@@ -70,10 +70,6 @@ METRIC_NAMES = (
     "faithfulness", "noise_sensitivity_in_relevant",
     "noise_sensitivity_in_irrelevant", "f1", "hallucination",
     "self_knowledge", "context_utilization",
-    # refusal calibration — per-item binaries conditioned on the retrieval
-    # judge (docs/abstention.md §3): did the generator do the right thing
-    # given what retrieval gave it. None where the situation did not arise.
-    "answers_with_relevant_context", "abstains_without_relevant_context",
 )
 
 
@@ -123,7 +119,7 @@ def _chunk_relevance(ret2a: list[list[dict]], n_chunks: int) -> list[bool | None
 def compute_item_metrics(entry: dict) -> dict:
     """All 11 RAGChecker metrics for one report entry; None = not computable.
 
-    Gating per project rulings (docs/abstention.md §4):
+    Gating per project rulings (docs/ragchecker.md#abstention):
     - extraction error (either side): item fully excluded - every metric None.
     - abstention: nothing is gated. Recall is judged from the response
       text as the paper does (a refusal entails nothing → 0, F1 0);
@@ -146,15 +142,6 @@ def compute_item_metrics(entry: dict) -> dict:
     relevance = _chunk_relevance(ret2a, n_chunks)
     known_chunks = [r for r in relevance if r is not None]
     metrics["context_precision"] = _ratio(sum(known_chunks), len(known_chunks))
-
-    # -- Refusal calibration, conditioned on claim_recall (None: no GT
-    #    claims or retrieval unjudged → neither applies) --
-    abstained = bool(entry.get("is_abstention"))
-    cr = metrics["claim_recall"]
-    if cr is not None and cr > 0:
-        metrics["answers_with_relevant_context"] = 0.0 if abstained else 1.0
-    elif cr == 0.0:
-        metrics["abstains_without_relevant_context"] = 1.0 if abstained else 0.0
 
     # -- Generator metrics --
     a2r = [cell.get("verdict") for cell in entry["answer2response"]]
@@ -239,7 +226,7 @@ def compute_item_metrics(entry: dict) -> dict:
 
 
 def _abstention_breakdown(results: list[dict]) -> dict:
-    """Item-level abstention partition (docs/abstention.md §3).
+    """Item-level abstention partition (docs/ragchecker.md#abstention).
 
     Judge A (annotation): gt_no_answer — the GT is an explicit "", no
     answer exists. Justified = abstained there; unwarranted = answered
@@ -314,11 +301,18 @@ def compute_overall_metrics(results: list[dict]) -> dict:
     # No-results leave the denominator: a tooling failure is charged exactly
     # once, in extraction_error_rate — never by diluting a behavior rate.
     # justified and unwarranted are rates over the items with no GT answer;
-    # unjustified over the items with one. (The plain abstention rate is
-    # not printed per run, so it is not a metric here — its numbers live in
-    # counts.abstention.)
+    # unjustified over the items with one. The unjustified rate is a system
+    # outcome; its generator-attributable share — refused although a chunk
+    # entailed a GT claim — is the only part charged to the generator
+    # (docs/ragchecker.md#abstention). The rest of the split (retriever fault,
+    # relevance unknown) stays in counts.abstention: the retriever's failure
+    # is already scored by claim_recall, and unknown indicts nobody. The
+    # plain abstention rate is not printed per run, so it is not a metric
+    # here either — its numbers live in counts.abstention.
     overall["justified_abstention_rate"] = _ratio(ab["justified"], ab["unanswerable"])
     overall["unjustified_abstention_rate"] = _ratio(ab["unjustified"], ab["answerable"])
+    overall["refused_with_relevant_chunks_rate"] = _ratio(
+        ab["relevant_chunk_present"], ab["answerable"])
     overall["unwarranted_answer_rate"] = _ratio(ab["unwarranted"], ab["unanswerable"])
     overall["extraction_error_rate"] = _ratio(errored, evaluated)
 
@@ -358,22 +352,23 @@ class RagCheckerPipeline(BaseService):
     # Headline of the run line and the Done line (the Overall group).
     _RUN_SUMMARY_KEYS = ("precision", "recall", "f1")
 
+    # The ⚪ tree's footer rates are echoed in the Metrics tree under the
+    # component they indict (output_conventions rule 0.1), so they are
+    # varianced there and the ⚪ variance section is empty for ragcheck.
     _VARIANCE_SECTIONS = {
         "metrics": [
-            ("Overall", ["precision", "recall", "f1"]),
+            ("Overall", ["precision", "recall", "f1",
+                         "unjustified_abstention_rate"]),
             ("Retriever", ["claim_recall", "context_precision"]),
             ("Generator", ["faithfulness", "hallucination", "self_knowledge",
-                           "answers_with_relevant_context",
-                           "abstains_without_relevant_context",
                            "context_utilization",
                            "noise_sensitivity_in_relevant",
-                           "noise_sensitivity_in_irrelevant"]),
+                           "noise_sensitivity_in_irrelevant",
+                           "refused_with_relevant_chunks_rate",
+                           "justified_abstention_rate",
+                           "unwarranted_answer_rate"]),
         ],
-        # Footer rates of the ⚪ tree only (rule set 4.1): abstention_rate
-        # stays in the JSON as distribution information but has no printed
-        # per-run derivation, so it does not enter the variance block.
-        "behavior": ["justified_abstention_rate",
-                     "unjustified_abstention_rate", "unwarranted_answer_rate"],
+        "behavior": [],
         "health": ["extraction_error_rate", "checker_failure_rate"],
     }
     # How to read each row — the round-bracket aid in the Metrics tree
@@ -383,18 +378,16 @@ class RagCheckerPipeline(BaseService):
         "claim_recall": "higher is better", "context_precision": "higher is better",
         "faithfulness": "higher is better", "hallucination": "lower is better",
         "self_knowledge": "depends on goals",
-        "answers_with_relevant_context": "higher is better",
-        "abstains_without_relevant_context": "depends on goals",
         "context_utilization": "higher is better",
         "noise_sensitivity_in_relevant": "lower is better",
         "noise_sensitivity_in_irrelevant": "lower is better",
         "justified_abstention_rate": "higher is better",
         "unjustified_abstention_rate": "lower is better",
+        "refused_with_relevant_chunks_rate": "lower is better",
         "unwarranted_answer_rate": "lower is better",
     }
     _VARIANCE_LABELS = {
-        "answers_with_relevant_context": "answers when context is relevant",
-        "abstains_without_relevant_context": "abstains when context is irrelevant",
+        "refused_with_relevant_chunks_rate": "refused with relevant chunks",
         "noise_sensitivity_in_relevant": "noise sensitivity relevant",
         "noise_sensitivity_in_irrelevant": "noise sensitivity irrelevant",
     }
@@ -561,7 +554,7 @@ class RagCheckerPipeline(BaseService):
         An explicit "" GT has no reference to check response claims
         against: the answer2response check cannot even be built, so
         precision is 0 by necessity. Likewise an empty "" response (a
-        full abstention, docs/abstention.md §1) entails no GT claim, so
+        full abstention, docs/extractor.md, Bucket 2) entails no GT claim, so
         response2answer is Neutral throughout and recall is 0 — the
         non-delivery §4 charges. Without this, an empty reference would
         leave those cells unjudged and recall null instead of 0. A
@@ -972,12 +965,19 @@ class RagCheckerPipeline(BaseService):
 
         n = run["_meta"]["evaluated_items"]
         support = run["counts"]["support"]
+        ab = run["counts"]["abstention"]
 
-        def fmt(name: str) -> str:
+        def fmt(name: str, num: int | None = None, den: int | None = None,
+                universe: str | None = None) -> str:
+            """Value + round-bracket aid. Paper metrics show their support when
+            it is short of n; abstention rates always show their fraction
+            (their denominator is a universe, not the item count)."""
             value = om.get(name)
             text = "n/a" if value is None else f"{value:.3f}"
             notes = []
-            if support.get(name) is not None and support[name] != n:
+            if universe is not None:
+                notes.append(f"{num} of {den} {universe}")
+            elif support.get(name) is not None and support[name] != n:
                 notes.append(f"{support[name]} of {n} items")
             if value is not None and name in self._METRIC_DIRECTIONS:
                 notes.append(self._METRIC_DIRECTIONS[name])
@@ -985,40 +985,44 @@ class RagCheckerPipeline(BaseService):
                 text += f"  ({' · '.join(notes)})"
             return text
 
+        def row(last: bool, label: str, text: str) -> None:
+            logger.info("     %s %-31s%s", "└─" if last else "├─", label, text)
+
         logger.info(" 📊 Metrics  (macro over %d items)", n)
         logger.info("    Overall — how well the response matches the"
                     " ground-truth answer")
-        logger.info("     ├─ %-38s%s", "precision:", fmt("precision"))
-        logger.info("     ├─ %-38s%s", "recall:", fmt("recall"))
-        logger.info("     └─ %-38s%s", "f1:", fmt("f1"))
+        row(False, "precision:", fmt("precision"))
+        row(False, "recall:", fmt("recall"))
+        row(False, "f1:", fmt("f1"))
+        row(True, "unjustified abstention rate:",
+            fmt("unjustified_abstention_rate", ab["unjustified"], ab["answerable"],
+                "answerable"))
         logger.info("    Retriever — did retrieval bring the needed evidence")
-        logger.info("     ├─ %-38s%s", "claim recall:", fmt("claim_recall"))
-        logger.info("     └─ %-38s%s", "context precision:",
-                    fmt("context_precision"))
+        row(False, "claim recall:", fmt("claim_recall"))
+        row(True, "context precision:", fmt("context_precision"))
         logger.info("    Generator — how the response used, ignored, or"
                     " invented beyond the context")
-        logger.info("     ├─ %-38s%s", "faithfulness:", fmt("faithfulness"))
-        logger.info("     ├─ %-38s%s", "hallucination:", fmt("hallucination"))
-        logger.info("     ├─ %-38s%s", "self knowledge:", fmt("self_knowledge"))
-        logger.info("     ├─ %-38s%s", "answers when context is relevant:",
-                    fmt("answers_with_relevant_context"))
-        logger.info("     ├─ %-38s%s", "abstains when context is irrelevant:",
-                    fmt("abstains_without_relevant_context"))
-        logger.info("     ├─ %-38s%s", "context utilization:",
-                    fmt("context_utilization"))
-        logger.info("     ├─ %-38s%s", "noise sensitivity relevant:",
-                    fmt("noise_sensitivity_in_relevant"))
-        logger.info("     └─ %-38s%s", "noise sensitivity irrelevant:",
-                    fmt("noise_sensitivity_in_irrelevant"))
+        row(False, "faithfulness:", fmt("faithfulness"))
+        row(False, "hallucination:", fmt("hallucination"))
+        row(False, "self knowledge:", fmt("self_knowledge"))
+        row(False, "context utilization:", fmt("context_utilization"))
+        row(False, "noise sensitivity relevant:", fmt("noise_sensitivity_in_relevant"))
+        row(False, "noise sensitivity irrelevant:",
+            fmt("noise_sensitivity_in_irrelevant"))
+        row(False, "refused with relevant chunks:",
+            fmt("refused_with_relevant_chunks_rate", ab["relevant_chunk_present"],
+                ab["answerable"], "answerable"))
+        row(False, "justified abstention rate:",
+            fmt("justified_abstention_rate", ab["justified"], ab["unanswerable"],
+                "unanswerable"))
+        row(True, "unwarranted answer rate:",
+            fmt("unwarranted_answer_rate", ab["unwarranted"], ab["unanswerable"],
+                "unanswerable"))
 
         logger.info("")
 
     def _log_abstention(self) -> None:
-        """⚪ Abstention Behavior tree — judge: retrieval evidence.
-
-        Extraction failures branch in only when present: they sit inside
-        the rate denominator (evaluated items), so the tree owes the
-        reconciliation."""
+        """⚪ Abstention Behavior tree."""
         if self.verbosity != "full":
             return
         ab = self.last_run["counts"]["abstention"]
@@ -1044,17 +1048,19 @@ class RagCheckerPipeline(BaseService):
                  [("refused with relevant chunks", ab["relevant_chunk_present"],
                    "a chunk entails a GT claim — generator fault"),
                   ("refused without relevant chunks", ab["all_chunks_irrelevant"],
-                   "no chunk entails any GT claim — retriever fault"),
+                   "no chunk entails any GT claim — retriever fault, generator not charged"),
                   ("refused, relevant chunks unknown", ab["relevance_unknown"],
                    "GT extracted to zero claims, or retrieval unjudged")]),
                 ("❌", ab["unwarranted"],
                  plural(ab["unwarranted"], "unwarranted answer"),
                  "GT empty — charged in precision"),
             ],
-            footer=[("justified abstention rate", ab["justified"],
-                     ab["unanswerable"], "unanswerable"),
-                    ("unjustified abstention rate", ab["unjustified"],
+            footer=[("unjustified abstention rate", ab["unjustified"],
                      ab["answerable"], "answerable"),
+                    ("refused with relevant chunks", ab["relevant_chunk_present"],
+                     ab["answerable"], "answerable"),
+                    ("justified abstention rate", ab["justified"],
+                     ab["unanswerable"], "unanswerable"),
                     ("unwarranted answer rate", ab["unwarranted"],
                      ab["unanswerable"], "unanswerable")],
             header_note=note,

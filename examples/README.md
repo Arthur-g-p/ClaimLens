@@ -206,7 +206,7 @@ should have said", and those are different failures.
 | 3 | constellation | gt is one sentence (Cygnus). The response adds the host star being too dim — true, but outside gt. | **noise_sensitivity_in_relevant** — the extra claim is grounded in a chunk but absent from gt, so it costs precision without being a hallucination. |
 | 4 | mass | gt keeps both sigma limits and stops there. The response also carries the radius revision 2.4 -> 2.1. | **recall** vs **precision** pulling apart — gt is fully covered, and the response carries more besides. |
 | 5 | orbital period | gt says **290 days**. The response says 365. Direct conflict. | **hallucination** again, via the only outright **Contradiction** in the set. |
-| 6 | surface composition | gt says the composition is unknown, and the response declines to answer. | **abstention_rate** and **unjustified_abstention_rate** — evidence was retrieved, the model declined. |
+| 6 | surface composition | gt says the composition is unknown, and the response declines to answer. | **unjustified_abstention_rate** and **refused_with_relevant_chunks_rate** — evidence was retrieved, the model declined. |
 | 7 | Milky Way | gt confirms it. The source context never states it — so a correct response here is unsupported by context. | **self_knowledge** — correct against gt, absent from the context. The cleanest single-claim case. |
 | 8 | star type | gt gives G-type, mass, volume, 5,518 K. The response abstains anyway. | **unjustified_abstention_rate** again, reached through the extractor rather than the heuristic. |
 
@@ -220,10 +220,21 @@ gt, absent from the context.
 
 ### On the two abstentions
 
-Both items 6 and 8 come back as **unjustified** abstentions. An abstention counts
-as justified only when the retriever gave the generator nothing to work with
-(item `claim_recall` = 0). Here the context discusses both surface composition
-and the host star, so the evidence was there and the model declined anyway.
+Both items 6 and 8 come back as **unjustified** abstentions. Their gt is
+present, so an answer was expected. An abstention is justified only where
+the gt is an explicit `""` (docs/ragchecker.md#abstention).
+
+An unjustified abstention has two possible causes:
+
+- **The retriever brought relevant content and the generator refused
+  anyway.** This is the generator's fault.
+- **The retriever brought nothing relevant and the generator had nothing
+  to work with.** This is not the generator's fault.
+
+Here the context discusses both the surface composition and the host star,
+so both refusals are the generator's. That is why the Generator group
+carries them under *refused with relevant chunks* and the Overall group
+carries the total under *unjustified abstention rate*.
 
 Item 6 is worth thinking about: the true answer *is* "the composition is
 unknown", so "I don't know" is arguably correct content rather than a refusal.

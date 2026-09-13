@@ -19,8 +19,10 @@ These hold across all display methods.
    over the same universe must be exhaustive *together* and declare
    their shared denominator (the header states what the total counts
    and what it excludes). Derived rates are not counts: a footer rate
-   may be echoed by the variance block, but only under the same name
-   and only when its derivation is visible per run.
+   may be echoed — by the 📊 Metrics tree, placed under the component
+   it indicts, and by the variance block — but only under the same name
+   and only when its derivation (the fraction) is visible per run. A
+   rate that indicts nobody is not echoed; it stays a count in its tree.
 
 2. **Rates are 0-1 decimals, everywhere.** The variance block prints
    `0.125`, tree footers print `0.125`, the JSON stores `0.125` — no
@@ -40,7 +42,9 @@ exhaustive.
    `→` line that closes the tree; never per-branch mini-footers
    interleaved between branches (they break the branch column and turn
    a tree-level derivation into a fake branch property). It derives the
-   rate, with its fraction visible: `→ Recall 0.964  (27 / 28)`. Variance (`--runs`)
+   rate, with its fraction visible: `→ recall 0.964 (27 / 28)`; an
+   overlong footer wraps onto continuation lines under the arrow and is
+   still that one footer. Variance (`--runs`)
    aggregates **only footer rates, under the same name** — counts never
    cross runs, and no rate enters the variance block that is not a
    visible footer derivation in the per-run output. The footer is
