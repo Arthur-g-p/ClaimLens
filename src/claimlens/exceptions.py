@@ -8,6 +8,7 @@ Hierarchy
 ---------
 ClaimLensError          ← catch-all for any package error
 ├── CLIError                 ← bad flags, missing files, I/O issues
+├── ViewerError              ← no HTML viewer for the report type / schema
 ├── ServiceError             ← orchestration / pipeline failures
 │   ├── InvalidInputError    ← validation rejects the data
 │   └── FilterError          ← nothing left after filtering
@@ -33,6 +34,13 @@ class ClaimLensError(Exception):
 
 class CLIError(ClaimLensError):
     """Raised when the CLI receives invalid arguments or encounters I/O issues."""
+
+
+# ── Viewer ───────────────────────────────────────────────────────────────────
+
+class ViewerError(ClaimLensError):
+    """Raised when a report cannot be rendered to HTML: no template for its
+    report type, or a schema_version the templates do not read."""
 
 
 # ── Service layer ────────────────────────────────────────────────────────────

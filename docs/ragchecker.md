@@ -111,6 +111,15 @@ per run. `--runs N` adds entries and reshapes nothing.
   `unwarranted_answer`, `extraction_failed`, `unjudged`. Empty branches stay
   present.
 
+The CLI also writes `{report_stem}.html` unless `--no-html` is given: a
+self-contained viewer rendered from the record and the findings by
+`claimlens.viewer.render_html`. It shows nothing the two JSON files do not
+contain — the run's metrics with their spread, then per item the GT claims,
+chunks and response claims with every verdict as a line between them. The
+template lives in `src/claimlens/templates/ragcheck.html` and declares the
+`schema_version` it reads; a schema bump fails the viewer test until the
+template follows.
+
 Consumers reading both old paper outputs and these reports need one
 canonicalization rule: string verdict entry = old format, object = new;
 missing field = "information not provided", never a crash.

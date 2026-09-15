@@ -385,6 +385,8 @@ class RagCheckerPipeline(BaseService):
         "unjustified_abstention_rate": "lower is better",
         "refused_with_relevant_chunks_rate": "lower is better",
         "unwarranted_answer_rate": "lower is better",
+        "extraction_error_rate": "lower is better",
+        "checker_failure_rate": "lower is better",
     }
     _VARIANCE_LABELS = {
         "refused_with_relevant_chunks_rate": "refused with relevant chunks",
