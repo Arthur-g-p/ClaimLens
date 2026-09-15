@@ -72,26 +72,23 @@ _ARGS_DENYLIST = frozenset({
 })
 
 
-def _capture_args(command: str) -> dict:
+def _capture_args(ctx: typer.Context, command: str) -> dict:
     """The ``_args`` block: every parameter of the current invocation.
 
-    Read from Click rather than enumerated by hand, so it cannot drift when a
-    flag is added. ``_explicit`` names the keys that were actually typed —
-    ``joint=true`` given on the command line and ``joint=true`` by default are
-    different facts when reconstructing a run later.
+    Read from the injected Click context rather than enumerated by hand, so it
+    cannot drift when a flag is added. ``_explicit`` names the keys that were
+    actually typed — ``joint=true`` given on the command line and
+    ``joint=true`` by default are different facts when reconstructing a run
+    later.
     """
-    import click
-
-    ctx = click.get_current_context(silent=True)
-    params = dict(ctx.params) if ctx else {}
-    explicit = []
-    if ctx:
-        from click.core import ParameterSource
-        explicit = sorted(
-            name for name in params
-            if name not in _ARGS_DENYLIST
-            and ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
-        )
+    params = dict(ctx.params)
+    # By name: typer >= 0.27 vendors click, so the enum class differs and the
+    # click package may be absent.
+    explicit = sorted(
+        name for name in params
+        if name not in _ARGS_DENYLIST
+        and getattr(ctx.get_parameter_source(name), "name", None) == "COMMANDLINE"
+    )
 
     values = {"command": command}
     for name, value in params.items():
@@ -294,6 +291,7 @@ def atomize(
 
 @app.command()
 def refcheck(
+    ctx: typer.Context,
     input_file: Path = typer.Argument(..., help="Path to JSON input file (needs 'response' + 'reference')."),
     output_file: Path = typer.Option(None, "--output", "-o", help="Output file path. Defaults to results/{input_stem}_refcheck.json. A *_findings.json sibling (the review queue) is written alongside."),
     extractor_model: str = typer.Option(..., "--extractor-model", "-e", help="Model for extraction; also the {model}_response_kg key prefix."),
@@ -348,7 +346,7 @@ def refcheck(
         raise typer.Exit(code=1)
 
     # The record is the source; the findings file is a view derived from it.
-    _args = _capture_args("refcheck")
+    _args = _capture_args(ctx, "refcheck")
     findings_file = output_file.with_name(output_file.stem + "_findings.json")
     output_file.write_text(
         json.dumps({"_args": _args, **report}, indent=2, ensure_ascii=False),
@@ -362,6 +360,7 @@ def refcheck(
 
 @app.command()
 def ragcheck(
+    ctx: typer.Context,
     input_file: Path = typer.Argument(..., help="Path to JSON input file (needs 'response' + 'gt_answer' + 'retrieved_context')."),
     output_file: Path = typer.Option(None, "--output", "-o", help="Report path. Defaults to results/{input_stem}_ragcheck[_{runs}].json. A *_findings.json sibling (the review queue) is written alongside."),
     html: bool = typer.Option(True, "--html/--no-html", help="Also write {report_stem}.html, a self-contained viewer of the report. Default: on."),
@@ -418,7 +417,7 @@ def ragcheck(
         raise typer.Exit(code=1)
 
     # The record is the source; the findings file and the HTML page are views derived from it.
-    _args = _capture_args("ragcheck")
+    _args = _capture_args(ctx, "ragcheck")
     record = {"_args": _args, **report}
     findings = {"_args": _args, **pipeline.last_findings}
     findings_file = output_file.with_name(output_file.stem + "_findings.json")
@@ -435,6 +434,7 @@ def ragcheck(
 
 @app.command()
 def faithcheck(
+    ctx: typer.Context,
     input_file: Path = typer.Argument(..., help="Path to JSON input file (needs 'response' + 'retrieved_context'; no ground truth)."),
     output_file: Path = typer.Option(None, "--output", "-o", help="Report path. Defaults to results/{input_stem}_faithcheck[_{runs}].json. A *_findings.json sibling (the review queue) is written alongside."),
     extractor_model: str = typer.Option(..., "--extractor-model", "-e", help="Model for response claim extraction."),
@@ -490,7 +490,7 @@ def faithcheck(
         raise typer.Exit(code=1)
 
     # The record is the source; the findings file is a view derived from it.
-    _args = _capture_args("faithcheck")
+    _args = _capture_args(ctx, "faithcheck")
     findings_file = output_file.with_name(output_file.stem + "_findings.json")
     output_file.write_text(
         json.dumps({"_args": _args, **report}, indent=2, ensure_ascii=False),
@@ -514,6 +514,7 @@ app.add_typer(eval_app)
 
 @eval_app.command("checker")
 def eval_checker(
+    ctx: typer.Context,
     input_file: Path = typer.Argument(
         ..., help="Path to eval JSON with GT triplets + human_label."
     ),
@@ -578,7 +579,7 @@ def eval_checker(
             runs=runs,
         )
         record, findings = evaluator.run_sync(data)
-        _args = _capture_args("eval checker")
+        _args = _capture_args(ctx, "eval checker")
     except ClaimLensError as exc:
         logger.error("")
         logger.error("❌ %s: %s", type(exc).__name__, exc)
@@ -602,6 +603,7 @@ def eval_checker(
 
 @eval_app.command("extractor")
 def eval_extractor(
+    ctx: typer.Context,
     input_file: Path = typer.Argument(
         ..., help="Path to eval JSON with GT triplets + response text."
     ),
@@ -687,7 +689,7 @@ def eval_extractor(
             runs=runs,
         )
         record, findings = evaluator.run_sync(data)
-        _args = _capture_args("eval extractor")
+        _args = _capture_args(ctx, "eval extractor")
     except ClaimLensError as exc:
         logger.error("")
         logger.error("❌ %s: %s", type(exc).__name__, exc)

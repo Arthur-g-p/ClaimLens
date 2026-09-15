@@ -9,6 +9,8 @@ apart once already.
 from pathlib import Path
 from unittest.mock import patch
 
+from enum import Enum
+
 import pytest
 
 from claimlens.cli import _ARGS_ORDER, _capture_args
@@ -89,20 +91,24 @@ class TestMetaConformance:
 
 # ── _args ────────────────────────────────────────────────────────────────────
 
+class _Source(Enum):
+    COMMANDLINE = 1
+    DEFAULT = 2
+
+
 class _FakeCtx:
     def __init__(self, params, explicit=()):
         self.params = params
         self._explicit = set(explicit)
 
     def get_parameter_source(self, name):
-        from click.core import ParameterSource
-        return (ParameterSource.COMMANDLINE if name in self._explicit
-                else ParameterSource.DEFAULT)
+        # Only the .name is contractual (typer 0.27 vendors click; the enum
+        # class differs and the real package may be absent).
+        return _Source.COMMANDLINE if name in self._explicit else _Source.DEFAULT
 
 
 def _capture(params, explicit=(), command="ragcheck"):
-    with patch("click.get_current_context", return_value=_FakeCtx(params, explicit)):
-        return _capture_args(command)
+    return _capture_args(_FakeCtx(params, explicit), command)
 
 
 class TestCaptureArgs:
