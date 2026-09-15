@@ -596,3 +596,25 @@ def check_faithfulness(
     )
     pipeline.run_sync([{"response": response, "retrieved_context": retrieved_context}])
     return pipeline.last_report["runs"][0]["items"][0]
+
+
+async def acheck_faithfulness(
+    response: str,
+    retrieved_context: list,
+    *,
+    extractor_model: str,
+    checker_model: str,
+    **pipeline_kwargs,
+) -> dict:
+    """The async twin of check_faithfulness, for callers already inside an
+    event loop (an async server, a notebook cell). Same arguments, same
+    return; it awaits the pipeline instead of wrapping it in asyncio.run.
+    """
+    pipeline = FaithfulnessPipeline(
+        extractor_model=extractor_model,
+        checker_model=checker_model,
+        verbosity="silent",
+        **pipeline_kwargs,
+    )
+    await pipeline.run([{"response": response, "retrieved_context": retrieved_context}])
+    return pipeline.last_report["runs"][0]["items"][0]

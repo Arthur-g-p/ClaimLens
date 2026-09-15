@@ -179,6 +179,55 @@ blocks (`extract`, `check`, `atomize`) instead emit the item list itself,
 enriched in place, so each one's output is the next one's input.
 `claimlens --help` lists all commands and flags.
 
+## Use it from Python
+
+The library is the same five verbs as the CLI, with the same keyword names
+as its flags. Keys come from `EXTRACTOR_API_KEY` and `CHECKER_API_KEY` in
+the environment or a `.env`, never as arguments.
+
+```python
+import json, claimlens
+
+items = json.load(open("data.json"))
+
+record, findings = claimlens.ragcheck(items, extractor_model="gpt-4o-mini", checker_model="gpt-4o-mini")
+record["metrics"]["faithfulness"]
+findings["hallucination"]          # the review queue, the same as the _findings.json file
+
+items = claimlens.extract(items, extractor_model="gpt-4o-mini")
+```
+
+`ragcheck`, `faithcheck` and `refcheck` return the record and the findings,
+the two documents the CLI writes. `extract` and `check` return the enriched
+item list. Extra keyword arguments go to the pipeline (`concurrency`,
+`joint`, `extractor_base_url`, `runs`, ...). Output is silent until you ask
+for it: `claimlens.enable_logging()` turns the console output on, and
+`verbosity="compact"` or `"silent"` per call sets how much.
+
+**Inside a running event loop** (a Jupyter cell, an async server) the sync
+verbs refuse with a message that says so. Use the pipeline classes with
+`await`. It is the same code:
+
+```python
+from claimlens.pipelines.ragchecker import RagCheckerPipeline
+
+pipeline = RagCheckerPipeline(extractor_model="gpt-4o-mini", checker_model="gpt-4o-mini")
+await pipeline.run(items)
+record, findings = pipeline.last_report, pipeline.last_findings
+```
+
+**One response, in real time.** The async form first, because the caller
+is usually a server:
+
+```python
+entry = await claimlens.acheck_faithfulness(response, chunks, extractor_model="gpt-4o-mini", checker_model="gpt-4o-mini")
+entry = claimlens.check_faithfulness(response, chunks, extractor_model="gpt-4o-mini", checker_model="gpt-4o-mini")
+```
+
+The public API is what `claimlens/__init__.py` exports. Everything under
+`claimlens.pipelines`, `.services` and `.workers` is importable but may
+change between minor versions.
+
 ## Using other providers and local models
 
 The extractor and checker are configured independently, and there are two ways

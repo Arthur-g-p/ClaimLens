@@ -1,10 +1,20 @@
 [project]
 name = "claimlens"
-version = "0.5.0"
-description = "A framework for evaluating LLM contexts."
+version = "1.0.0"
+description = "Claim-level evaluation for LLM outputs: decompose text into atomic claims, then verify every claim against a reference."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
+authors = [{ name = "Arthur Galas" }]
+keywords = ["llm", "evaluation", "rag", "hallucination", "faithfulness", "claim-verification"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "typer>=0.9.0",
     "httpx>=0.27.0",
@@ -25,12 +35,20 @@ test = [
 [project.scripts]
 claimlens = "claimlens.cli:app"
 
+[project.urls]
+Homepage = "https://github.com/Arthur-g-p/claimlens"
+Repository = "https://github.com/Arthur-g-p/claimlens"
+Issues = "https://github.com/Arthur-g-p/claimlens/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claimlens"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["eval_data/", "examples/", "docs/", "scratch/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
