@@ -10,6 +10,8 @@ Run with:
     pytest tests/integration/test_llmclient_fatal.py -v
 """
 
+import importlib.util
+
 import httpx
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -106,7 +108,12 @@ def client(tmp_path):
     return c
 
 
-@pytest.fixture(params=["openai", "litellm"])
+needs_litellm = pytest.mark.skipif(
+    importlib.util.find_spec("litellm") is None,
+    reason="litellm not installed: pip install 'claimlens[litellm]'")
+
+
+@pytest.fixture(params=["openai", pytest.param("litellm", marks=needs_litellm)])
 def client_and_mock(request, tmp_path):
     """Fixture parameterizing the client across OpenAI and LiteLLM paths."""
     mode = request.param

@@ -8,12 +8,18 @@ without importing the client.
 """
 
 import asyncio
+import importlib.util
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from claimlens.exceptions import LLMClientError
 from claimlens.llmclient import LLMClient, RETRY_MATRIX
 from claimlens.stats import GLOBAL_STATS
+
+needs_litellm = pytest.mark.skipif(
+    importlib.util.find_spec("litellm") is None,
+    reason="litellm not installed: pip install 'claimlens[litellm]'")
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +93,7 @@ class TestClientRecordsTheLock:
                                    schema=ExtractionResult, task="extract"))
             assert GLOBAL_STATS.strategies()["m"] == rung.name
 
+    @needs_litellm
     def test_litellm_records_the_routing_mode_not_a_rung(self):
         """LiteLLM locks an index without ever consulting the matrix."""
         c = LLMClient(api_key="k", model="openrouter/foo", base_url=None)
@@ -94,6 +101,13 @@ class TestClientRecordsTheLock:
         with patch("litellm.acompletion", new_callable=AsyncMock, return_value=_ok()):
             asyncio.run(c.generate([{"role": "user", "content": "x"}], task="extract"))
         assert GLOBAL_STATS.strategies() == {"openrouter/foo": "LiteLLM passthrough"}
+
+    def test_litellm_missing_fails_at_construction_with_the_install_hint(self):
+        """No base URL means the LiteLLM route. Without the extra installed the
+        client refuses to construct, before any request, and says what to do."""
+        with patch("importlib.util.find_spec", return_value=None):
+            with pytest.raises(LLMClientError, match=r"claimlens\[litellm\].*--extractor-base-api"):
+                LLMClient(api_key="k", model="openrouter/foo", base_url=None)
 
     def test_adopting_a_cached_lock_does_not_rerecord(self):
         """A sibling adopting the process cache never locked — it must not write."""

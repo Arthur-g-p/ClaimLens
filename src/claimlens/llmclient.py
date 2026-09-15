@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import importlib.util
 import random
 import sys
 import time
@@ -142,6 +143,14 @@ class LLMClient:
                 max_retries=0,
             )
         else:
+            # LiteLLM mode. The dependency is an optional extra, so refuse here,
+            # before any request is built, rather than mid-batch as a code bug.
+            if importlib.util.find_spec("litellm") is None:
+                raise LLMClientError(
+                    f"Model '{self.model}' has no base URL, so it would be routed through "
+                    "LiteLLM, which is not installed. Either install the extra, "
+                    "pip install 'claimlens[litellm]', or pass --extractor-base-api / "
+                    "--checker-base-api to use the direct endpoint.")
             self.client = None  # LiteLLM mode — no direct client needed
         
         self._connection_verified = False

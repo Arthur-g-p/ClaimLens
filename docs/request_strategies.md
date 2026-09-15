@@ -22,7 +22,9 @@ are this document.
 **Set a base URL** — `--extractor-base-api` or `--checker-base-api` — and the
 request goes out over the [OpenAI SDK][openai-sdk], directly to that endpoint.
 **Leave it unset** and the provider is read from a prefix on the model name, and
-LiteLLM resolves the endpoint, credentials and request transformation.
+LiteLLM resolves the endpoint, credentials and request transformation. This
+path needs the optional extra, `pip install 'claimlens[litellm]'`. Without it
+the client refuses at construction and says so.
 
 ```bash
 # base URL set → OpenAI SDK, straight to the endpoint

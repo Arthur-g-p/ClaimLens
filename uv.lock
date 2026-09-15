@@ -237,7 +237,6 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
-    { name = "litellm" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -246,8 +245,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+litellm = [
+    { name = "litellm" },
+]
 test = [
     { name = "coverage" },
+    { name = "litellm" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -256,7 +259,8 @@ test = [
 requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "litellm", specifier = ">=1.0.0" },
+    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.0.0" },
+    { name = "litellm", marker = "extra == 'test'", specifier = ">=1.0.0" },
     { name = "openai", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
@@ -265,7 +269,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.60" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
-provides-extras = ["test"]
+provides-extras = ["litellm", "test"]
 
 [[package]]
 name = "click"

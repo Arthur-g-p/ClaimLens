@@ -97,6 +97,16 @@ To also install the test dependencies (pytest, pytest-asyncio, coverage):
 uv pip install -e ".[test]"
 ```
 
+LiteLLM routing (a provider prefix on the model name, no base URL) is an
+optional extra. The default install talks to any OpenAI-compatible endpoint
+directly and stays small. To add the routing path:
+
+```bash
+uv pip install -e ".[litellm]"
+```
+
+From PyPI that is `pip install "claimlens[litellm]"`.
+
 Verify the install:
 
 ```bash
@@ -257,7 +267,7 @@ claimlens extract examples/extract/kepler22b.json \
 The same flag points at any OpenAI-compatible server, including a local one
 (`--extractor-base-api http://localhost:11434/v1`).
 
-**LiteLLM routing** — omit the base URL and prefix the model with its provider
+**LiteLLM routing** (optional extra, `claimlens[litellm]`) — omit the base URL and prefix the model with its provider
 instead. LiteLLM resolves the endpoint:
 
 ```bash
