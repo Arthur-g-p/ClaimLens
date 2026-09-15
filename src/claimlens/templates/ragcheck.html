@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="claimlens-schema" content="5">
+<title>claimlens · ragcheck</title>
+<style>
+/*COMMON_CSS*/
+html,body{height:100%}
+body{display:flex;flex-direction:column;overflow:hidden}
+header{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px}
+header .sp{flex:1}
+#stage{flex:1;overflow:auto;position:relative}
+.screen{padding:18px 24px 60px;max-width:1240px;margin:0 auto}
+.mlead{font-size:12px;color:var(--muted);margin-bottom:10px}
+.cluster{margin-bottom:16px}
+.cluster h2{font-size:12.5px;margin:0 0 6px}
+.cluster h2 span{font-weight:400;color:var(--muted)}
+.band{display:flex;flex-wrap:wrap;gap:10px}
+.cell{flex:0 0 158px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.cell .k{font-size:11.5px;color:var(--muted)}
+.cell .k .mono{color:var(--fg)}
+.cell .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1;margin:4px 0 2px}
+.cell .v small{font-size:11.5px;font-weight:400;color:var(--muted);margin-left:4px}
+.cell .bar{height:7px;margin-top:6px}
+.cell .dots{margin-top:5px}
+.cell .n{font-size:11px;color:var(--muted);margin-top:4px}
+.health{font-size:12.5px;color:var(--muted);margin:2px 0 0}
+.health b{color:var(--fg);font-variant-numeric:tabular-nums}
+.items{margin-top:22px}
+.items h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
+.items h2 span{text-transform:none;letter-spacing:0;font-weight:400}
+.row{display:grid;grid-template-columns:2.4em 1fr auto auto;gap:12px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:6px;cursor:pointer}
+.row:hover{border-color:var(--accent)}
+.row .q{font-size:13.5px}
+.row .dots2{display:flex;gap:4px;align-items:center}
+.row .dots2 i{width:11px;height:11px;border-radius:50%;background:var(--neu);display:inline-block}
+.row .dots2 i.ent{background:var(--ent)}.row .dots2 i.con{background:var(--con)}.row .dots2 i.unj{background:var(--unj)}
+.row .f{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.row .f b{color:var(--fg)}
+.itemhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.itemhead h2{font-size:15px;margin:0}
+.im{font-size:12px;color:var(--muted);margin-bottom:14px}
+.im b{color:var(--fg);font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--muted);align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.legend i{display:inline-block;width:16px;height:0;border-top:3px solid;margin-right:5px;vertical-align:middle}
+#cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:80px;position:relative;align-items:start;min-width:760px}
+.col h3{margin:0 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;justify-content:space-between}
+.col h3 .n{font-weight:400;text-transform:none;letter-spacing:0}
+.src{font-size:12.5px;color:var(--muted);background:var(--card);border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin-bottom:14px;max-height:92px;overflow:auto}
+.node{position:relative;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--neu);border-radius:8px;padding:8px 10px 8px 12px;margin-bottom:12px;font-size:13px;transition:opacity .12s,box-shadow .12s}
+.node.ent{border-left-color:var(--ent)}.node.con{border-left-color:var(--con)}.node.unj{border-left-color:var(--unj)}
+.node.chunk{border-left-width:1px;cursor:pointer}
+.node.chunk.rel{border-color:var(--ent);box-shadow:0 0 0 1px var(--ent) inset}
+.node .cid{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted)}
+.node .ex{color:var(--muted);font-size:12px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.node.open .ex{display:block;-webkit-line-clamp:unset}
+#cols.focus .node:not(.hi){opacity:.28}
+.node.hi{box-shadow:0 0 0 2px var(--accent)}
+.node.chunk.rel.hi{box-shadow:0 0 0 2px var(--accent),0 0 0 1px var(--ent) inset}
+svg#edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+svg#edges path{fill:none;stroke-width:2.5;opacity:.8;pointer-events:stroke;cursor:pointer;transition:opacity .12s}
+svg#edges path.ent{stroke:var(--ent)}
+svg#edges path.con{stroke:var(--con)}
+svg#edges path.unj{stroke:var(--unj);stroke-dasharray:2 4}
+svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opacity:0;pointer-events:none}
+#cols.focus svg#edges path:not(.hi){opacity:.07}
+#cols.focus svg#edges path.hi{opacity:1;stroke-width:3.5}
+#cols.focus svg#edges path.neu.hi{opacity:.55;stroke-width:2}
+#tip{position:fixed;z-index:10;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.2);pointer-events:none}
+#tip .r{margin:4px 0}
+#tip .r+.r{border-top:1px solid var(--line);padding-top:4px}
+:root{--gt:#8b5cf6;--pred:#1e5f8a}
+@media (prefers-color-scheme:dark){:root{--gt:#b794f6;--pred:#4a9de0}}
+#cg h3{color:var(--gt)}#cp h3{color:var(--pred)}
+#cg .src{border:1.5px solid var(--gt)}#cp .src{border:1.5px solid var(--pred)}
+#cg .node{border-top-color:var(--gt);border-right-color:var(--gt);border-bottom-color:var(--gt)}
+#cp .node{border-top-color:var(--pred);border-right-color:var(--pred);border-bottom-color:var(--pred)}
+.node .pills{display:block;margin-top:5px}
+#tip .sec+.sec{border-top:3px double var(--line);margin-top:8px;padding-top:6px}
+#tip .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
+</style></head><body>
+<script type="application/json" id="record">__RECORD__</script>
+<script type="application/json" id="findings">__FINDINGS__</script>
+<script type="application/json" id="roster">{
+  "groups": [
+    ["Overall", "how well the response matches the ground-truth answer",
+     ["precision", "recall", "f1", "unjustified_abstention_rate"]],
+    ["Retriever", "did retrieval bring the needed evidence",
+     ["claim_recall", "context_precision"]],
+    ["Generator", "how the response used, ignored, or invented beyond the context",
+     ["faithfulness", "hallucination", "self_knowledge", "context_utilization",
+      "noise_sensitivity_in_relevant", "noise_sensitivity_in_irrelevant",
+      "refused_with_relevant_chunks_rate", "justified_abstention_rate", "unwarranted_answer_rate"]]
+  ],
+  "health": ["extraction_error_rate", "checker_failure_rate"],
+  "directions": {
+    "precision": "higher is better", "recall": "higher is better", "f1": "higher is better",
+    "claim_recall": "higher is better", "context_precision": "higher is better",
+    "faithfulness": "higher is better", "hallucination": "lower is better",
+    "self_knowledge": "depends on goals",
+    "context_utilization": "higher is better",
+    "noise_sensitivity_in_relevant": "lower is better",
+    "noise_sensitivity_in_irrelevant": "lower is better",
+    "justified_abstention_rate": "higher is better",
+    "unjustified_abstention_rate": "lower is better",
+    "refused_with_relevant_chunks_rate": "lower is better",
+    "unwarranted_answer_rate": "lower is better",
+    "extraction_error_rate": "lower is better",
+    "checker_failure_rate": "lower is better"
+  },
+  "universes": {
+    "unjustified_abstention_rate": ["unjustified", "answerable"],
+    "refused_with_relevant_chunks_rate": ["relevant_chunk_present", "answerable"],
+    "justified_abstention_rate": ["justified", "unanswerable"],
+    "unwarranted_answer_rate": ["unwarranted", "unanswerable"]
+  }
+}</script>
+<header>
+  <h1 id="title"></h1><span class="muted" id="meta"></span>
+  <span class="sp"></span>
+  <span class="seg" id="runseg"></span>
+</header>
+<div id="stage">
+  <div class="screen" id="run"></div>
+  <div class="screen" id="item" hidden></div>
+</div>
+<div id="tip" hidden></div>
+<script>
+/*COMMON_JS*/
+</script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  // The roster island mirrors RagCheckerPipeline._VARIANCE_SECTIONS and
+  // _METRIC_DIRECTIONS; tests/unit/test_viewer.py asserts they are equal.
+  const ROSTER = JSON.parse(document.getElementById('roster').textContent);
+  const DIR = ROSTER.directions;
+  const arrow = k => { const d = DIR[k]; return d === "higher is better" ? "↑" : d === "lower is better" ? "↓" : d ? "↕" : ""; };
+  const LOWER = k => DIR[k] === "lower is better";
+
+  const q = new URLSearchParams(location.search);
+  let runIdx = Math.min(NRUNS - 1, Math.max(0, +(q.get("run") || 0)));
+  let sel = q.has("item") ? +q.get("item") : null;
+  let pinned = null, EDGES = [];
+  const items = () => R.runs[runIdx].items;
+  const stage = $('stage'), tip = $('tip');
+
+  const inputName = String((R._args || {}).input_file || "").split("/").pop();
+  $('title').textContent = "claimlens · ragcheck" + (inputName ? " · " + inputName : "");
+  $('meta').innerHTML = metaLine();
+
+  function renderRunSeg(){
+    $('runseg').innerHTML = NRUNS > 1 ? R.runs.map((_, i) => '<button class="' + (i === runIdx ? "on" : "") + '" data-r="' + i + '">Run ' + (i + 1) + "</button>").join("") : "";
+  }
+
+  // ── screen 1: the run ─────────────────────────────────────────────
+  // Grounded means at least one chunk entails the claim, the definition
+  // behind faithfulness. Contradiction only counts when nothing entails.
+  function groundClass(it, i){
+    let ent = false, con = false, unj = false;
+    for(const c of ((it.retrieved2response || [])[i] || [])){
+      const v = V(c).verdict;
+      if(v === "Entailment") ent = true; else if(v === "Contradiction") con = true; else if(v == null) unj = true;
+    }
+    return ent ? "ent" : con ? "con" : unj ? "unj" : "neu";
+  }
+  // The console's rule: abstention rates always show their fraction of a
+  // universe (answerable / unanswerable); paper metrics show support only
+  // when it is short of the item count.
+  function supportNote(run, k){
+    const u = ROSTER.universes[k];
+    if(u){ const ab = (run.counts || {}).abstention || {}; return ab[u[0]] + ' of ' + ab[u[1]] + ' ' + u[1]; }
+    const s = support(run, k), n = run._meta.evaluated_items;
+    return (s == null || s === n) ? '' : s + ' of ' + n + ' items';
+  }
+  function metricCell(k, run){
+    const m = R.metrics[k], vr = R.variance[k];
+    return '<div class="cell" title="' + (DIR[k] || "") + '"><div class="k"><span class="mono">' + k + '</span> ' + arrow(k) + '</div>'
+      + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(3)) + (NRUNS > 1 && vr && vr.std != null ? '<small>± ' + vr.std.toFixed(3) + '</small>' : '') + '</div>'
+      + (m == null ? '' : '<div class="bar"><i class="' + (LOWER(k) ? "bad" : "") + '" style="width:' + (m * 100) + '%"></i></div>')
+      + (NRUNS > 1 ? dotsHtml(vr, m) : '')
+      + '<div class="n">' + supportNote(run, k) + '</div></div>';
+  }
+  function healthNote(run, k){
+    const rl = (run.counts || {}).reliability || {};
+    if(k === "extraction_error_rate" && rl.extraction) return rl.extraction.failed + ' of ' + rl.extraction.items + ' items failed';
+    if(k === "checker_failure_rate" && rl.checking) return rl.checking.unjudged + ' of ' + rl.checking.issued + ' verdicts unjudged';
+    return '';
+  }
+  function renderRun(){
+    const run = R.runs[runIdx];
+    let h = '<div class="mlead">Metrics · ' + (NRUNS > 1 ? 'mean over ' + NRUNS + ' runs · support and counts from run ' + (runIdx + 1) : 'macro over ' + run._meta.evaluated_items + ' items') + '</div>';
+    ROSTER.groups.forEach(([name, desc, keys]) => {
+      h += '<div class="cluster"><h2>' + name + ' <span>— ' + esc(desc) + '</span></h2><div class="band">' + keys.map(k => metricCell(k, run)).join("") + '</div></div>'; });
+    h += '<div class="health">Reliability · ' + ROSTER.health.map(k => '<span class="mono">' + k + '</span> ' + arrow(k) + ' <b>' + fmt(R.metrics[k], 3) + '</b>' + (healthNote(run, k) ? ' (' + healthNote(run, k) + ')' : '')).join(' · ') + '</div>';
+    h += '<div class="items"><h2>Items <span>· one dot per response claim, lime = grounded in a chunk' + (NRUNS > 1 ? ' · run ' + (runIdx + 1) : '') + '</span></h2>';
+    items().forEach((it, i) => { const m = it.metrics || {};
+      const dots = it.is_abstention ? '<span class="tag warn" title="The response declined to answer.">abstained</span>' : (it.response_claims.length ? it.response_claims.map((_, ci) => '<i class="' + groundClass(it, ci) + '"></i>').join("") : '<span class="na">no claims</span>');
+      h += '<div class="row" data-i="' + i + '"><span class="muted">#' + (i + 1) + '</span><span class="q">' + esc(it.query) + '</span><span class="dots2">' + dots + '</span><span class="f">f1 <b>' + fmt(m.f1) + '</b> · hallucination <b>' + fmt(m.hallucination) + '</b></span></div>'; });
+    $('run').innerHTML = h + "</div>";
+  }
+
+  // ── screen 2: one item ────────────────────────────────────────────
+  function claimNode(id, v, text, tags, it){
+    const pills = (tags.get(it.query + SEP + text) || []).map(x => tagHtml(x.branch, x.e)).join(" ");
+    return '<div class="node ' + vcls(v.verdict) + '" data-id="' + id + '">' + esc(text) + (pills ? '<span class="pills">' + pills + '</span>' : '') + '</div>';
+  }
+  function renderItem(){
+    const it = items()[sel], m = it.metrics || {}, tags = findingTags(runIdx);
+    let h = '<div class="itemhead"><button class="btn" id="back">‹ run</button><button class="btn" id="prev" title="previous item">‹</button><button class="btn" id="next" title="next item">›</button><h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
+    h += '<div class="im">this item' + (NRUNS > 1 ? ', run ' + (runIdx + 1) : '') + ' · precision <b>' + fmt(m.precision) + '</b> · recall <b>' + fmt(m.recall) + '</b> · f1 <b>' + fmt(m.f1) + '</b> · faithfulness <b>' + fmt(m.faithfulness) + '</b> · hallucination <b>' + fmt(m.hallucination) + '</b></div>';
+    h += '<div class="legend"><span><i style="border-color:var(--ent)"></i>Entailment</span><span><i style="border-color:var(--con)"></i>Contradiction</span><span><i style="border-color:var(--neu);border-top-style:dashed;border-top-width:2px"></i>Neutral, on hover</span><span><i style="border-color:var(--unj);border-top-style:dotted"></i>unjudged</span></div>';
+    let g = '<h3>GT answer <span class="n">' + it.gt_answer_claims.length + ' claims</span></h3><div class="src">' + (it.gt_answer ? esc(it.gt_answer) : "<i>(empty — unanswerable)</i>") + "</div>";
+    it.gt_answer_claims.forEach((c, i) => { g += claimNode("g" + i, V(it.response2answer[i]), ct(c), tags, it); });
+    if(!it.gt_answer_claims.length) g += '<div class="na">no GT claims</div>';
+    let c = '<h3>Retrieved chunks <span class="n">' + (it.retrieved_context || []).length + " · ★ relevant " + (it.relevant_chunks || []).length + "</span></h3>";
+    (it.retrieved_context || []).forEach((_, j) => { const cx = ctxOf(it, j), rel = isRel(it, j);
+      c += '<div class="node chunk ' + (rel ? "rel" : "") + '" data-id="c' + j + '"><span class="cid">' + shortChunk(j) + " · " + esc(cx.doc_id) + "</span>" + (rel ? ' <span class="tag good" title="Relevant: this chunk entails at least one GT claim.">★ relevant</span>' : "") + '<div class="ex">' + esc(cx.text) + "</div></div>"; });
+    let p = '<h3>Response <span class="n">' + it.response_claims.length + " claims" + (it.is_abstention ? " · abstained" : "") + '</span></h3><div class="src">' + (it.response ? esc(it.response) : "<i>(empty)</i>") + "</div>";
+    it.response_claims.forEach((cl, i) => { p += claimNode("p" + i, V(it.answer2response[i]), ct(cl), tags, it); });
+    if(!it.response_claims.length) p += '<div class="na">no claims' + (it.is_abstention ? " — the response abstained" : "") + "</div>";
+    h += '<div id="cols"><svg id="edges"></svg><div class="col" id="cg">' + g + '</div><div class="col" id="cc">' + c + '</div><div class="col" id="cp">' + p + '</div></div>';
+    $('item').innerHTML = h;
+    pinned = null; hideTip();
+    $('back').addEventListener("click", back);
+    $('prev').addEventListener("click", () => go(sel - 1));
+    $('next').addEventListener("click", () => go(sel + 1));
+    requestAnimationFrame(drawEdges);
+  }
+  function buildEdges(){
+    const it = items()[sel]; EDGES = [];
+    it.gt_answer_claims.forEach((_, i) => (it.retrieved2answer[i] || []).forEach((cell, j) => { const v = V(cell); EDGES.push({from: "g" + i, to: "c" + j, cls: vcls(v.verdict), v: vname(v.verdict), expl: v.explanation || "", label: "GT claim " + (i + 1) + " vs " + shortChunk(j)}); }));
+    it.response_claims.forEach((_, i) => (it.retrieved2response[i] || []).forEach((cell, j) => { const v = V(cell); EDGES.push({from: "c" + j, to: "p" + i, cls: vcls(v.verdict), v: vname(v.verdict), expl: v.explanation || "", label: "response claim " + (i + 1) + " vs " + shortChunk(j)}); }));
+  }
+  function drawEdges(){
+    const cols = $('cols'); if(!cols || $('item').hidden) return;
+    buildEdges(); const svg = $('edges'), cr = cols.getBoundingClientRect();
+    svg.style.width = cols.scrollWidth + "px"; svg.style.height = cols.scrollHeight + "px";
+    const pos = id => { const el = cols.querySelector('[data-id="' + id + '"]'); if(!el) return null; const r = el.getBoundingClientRect(); return {l: r.left - cr.left, r: r.right - cr.left, y: r.top - cr.top + r.height / 2}; };
+    let h = ""; EDGES.forEach((e, k) => { const a = pos(e.from), b = pos(e.to); if(!a || !b) return; const x1 = a.r, x2 = b.l, dx = (x2 - x1) / 2;
+      h += '<path class="' + e.cls + '" data-k="' + k + '" data-from="' + e.from + '" data-to="' + e.to + '" d="M' + x1 + "," + a.y + " C" + (x1 + dx) + "," + a.y + " " + (x2 - dx) + "," + b.y + " " + x2 + "," + b.y + '"/>'; });
+    svg.innerHTML = h; if(pinned) focusNode(pinned);
+  }
+
+  // ── hover, pin, tooltip ───────────────────────────────────────────
+  function placeTip(x, y){ const w = tip.offsetWidth, hh = tip.offsetHeight; let L = x + 14, T = y + 14; if(L + w > innerWidth - 8) L = x - w - 14; if(T + hh > innerHeight - 8) T = Math.max(8, y - hh - 14); tip.style.left = L + "px"; tip.style.top = T + "px"; }
+  function showTip(html, x, y){ tip.innerHTML = html; tip.hidden = false; placeTip(x, y); }
+  function hideTip(){ tip.hidden = true; }
+  function clearHi(){ const cols = $('cols'); if(cols) cols.querySelectorAll(".hi").forEach(n => n.classList.remove("hi")); }
+  function focusNode(id){ const cols = $('cols'); if(!cols) return; cols.classList.add("focus"); clearHi();
+    const me = cols.querySelector('[data-id="' + id + '"]'); if(me) me.classList.add("hi");
+    cols.querySelectorAll('path[data-from="' + id + '"],path[data-to="' + id + '"]').forEach(p => { p.classList.add("hi"); const other = p.dataset.from === id ? p.dataset.to : p.dataset.from; const n = cols.querySelector('[data-id="' + other + '"]'); if(n) n.classList.add("hi"); }); }
+  function unfocus(){ if(pinned){ focusNode(pinned); return; } const cols = $('cols'); if(cols) cols.classList.remove("focus"); clearHi(); }
+  function vRow(label, v){ return '<div class="r"><span class="muted">' + label + '</span> <b style="color:var(--' + vcls(v.verdict) + ')">' + esc(vname(v.verdict)) + "</b>" + (v.explanation ? "<div>" + esc(v.explanation) + "</div>" : "") + "</div>"; }
+  function nodeTip(id){ const it = items()[sel], kind = id[0], i = +id.slice(1);
+    if(kind === "c"){ const cx = ctxOf(it, i); return '<div class="r"><b>' + esc(cx.doc_id || shortChunk(i)) + "</b>" + (isRel(it, i) ? ' <span class="tag good">★ entails at least one GT claim</span>' : "") + '</div><div class="r muted">' + esc(cx.text.length > 420 ? cx.text.slice(0, 419) + "…" : cx.text) + "</div>"; }
+    // Two different operations: the claim against the other side's whole text, then the claim against each chunk.
+    const whole = kind === "p" ? vRow("vs GT answer", V(it.answer2response[i])) : vRow("vs response", V(it.response2answer[i]));
+    const cells = (kind === "p" ? it.retrieved2response[i] : it.retrieved2answer[i]) || [];
+    return '<div class="sec">' + whole + '</div><div class="sec"><div class="sh">vs retrieved chunks</div>'
+      + cells.map((c, j) => vRow("vs " + shortChunk(j) + (isRel(it, j) ? " ★" : ""), V(c))).join("") + '</div>'; }
+
+  $('item').addEventListener("mouseover", e => { const n = e.target.closest(".node"), p = e.target.closest("path");
+    if(n){ focusNode(n.dataset.id); showTip(nodeTip(n.dataset.id), e.clientX, e.clientY); }
+    else if(p){ const ed = EDGES[+p.dataset.k]; p.classList.add("hi"); showTip('<div class="r"><span class="muted">' + esc(ed.label) + '</span> <b style="color:var(--' + ed.cls + ')">' + esc(ed.v) + "</b></div><div>" + esc(ed.expl || "(no explanation recorded)") + "</div>", e.clientX, e.clientY); } });
+  $('item').addEventListener("mousemove", e => { if(!tip.hidden) placeTip(e.clientX, e.clientY); });
+  $('item').addEventListener("mouseout", e => { const n = e.target.closest(".node"), p = e.target.closest("path"); if(!n && !p) return; hideTip(); if(n) unfocus(); if(p && !pinned) p.classList.remove("hi"); });
+  $('item').addEventListener("click", e => { const n = e.target.closest(".node"); if(!n) return;
+    if(n.classList.contains("chunk")){ n.classList.toggle("open"); requestAnimationFrame(drawEdges); return; }
+    pinned = (pinned === n.dataset.id) ? null : n.dataset.id; if(pinned) focusNode(pinned); else { $('cols').classList.remove("focus"); clearHi(); } });
+
+  // ── navigation ────────────────────────────────────────────────────
+  function go(i){ const n = items().length; if(!n) return; sel = ((i % n) + n) % n; $('run').hidden = true; $('item').hidden = false; renderItem(); stage.scrollTop = 0; }
+  function back(){ sel = null; pinned = null; hideTip(); $('item').hidden = true; $('run').hidden = false; renderRun(); }
+  $('run').addEventListener("click", e => { const r = e.target.closest(".row"); if(r) go(+r.dataset.i); });
+  $('runseg').addEventListener("click", e => { const b = e.target.closest("button[data-r]"); if(!b) return; runIdx = +b.dataset.r; renderRunSeg(); if(sel == null) renderRun(); else go(sel); });
+  document.addEventListener("keydown", e => {
+    if(sel == null) return;
+    if(e.key === "ArrowRight") go(sel + 1); else if(e.key === "ArrowLeft") go(sel - 1); else return;
+    e.preventDefault(); });
+  window.addEventListener("resize", () => requestAnimationFrame(drawEdges));
+  stage.addEventListener("scroll", () => { if(!tip.hidden) hideTip(); });
+
+  renderRunSeg();
+  if(sel != null && items()[sel]){ go(sel); const f = q.get("focus"); if(f) requestAnimationFrame(() => { pinned = f; focusNode(f); }); }
+  else { sel = null; renderRun(); }
+})();
+</script>
+</body></html>
