@@ -1,6 +1,6 @@
 [project]
 name = "claimlens"
-version = "1.0.0"
+version = "1.0.1"
 description = "Claim-level evaluation for LLM outputs: decompose text into atomic claims, then verify every claim against a reference."
 readme = "README.md"
 license = "MIT"
