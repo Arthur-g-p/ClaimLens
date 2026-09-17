@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="claimlens-schema" content="5">
+<title>claimlens · faithcheck</title>
+<style>
+/*COMMON_CSS*/
+.screen{--gridcols:20}
+.resp{font-size:17px;line-height:1.6;background:var(--card);border:2px solid var(--pred);border-radius:10px;padding:16px 18px;margin:6px 0 18px}
+.resp .na{font-size:14px}
+h2.sec{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:18px 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2.sec span{text-transform:none;letter-spacing:0;font-weight:400}
+h2.sec .seg{margin-left:auto}
+h2.sec .seg button{font-size:12px;padding:3px 9px}
+.claim{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--neu);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s}
+.claim.ent{border-left-color:var(--ent)}.claim.con{border-left-color:var(--con)}.claim.unj{border-left-color:var(--unj)}
+.claim.on{box-shadow:0 0 0 2px var(--accent)}
+.claim .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.claim .txt{font-size:14px;flex:1;min-width:200px}
+.cstrip{display:grid;grid-template-columns:repeat(var(--gridcols),14px);gap:3px;margin-top:8px}
+.cstrip i{width:14px;height:14px;border-radius:3px;background:var(--neu-bg);border:1px solid var(--line);display:inline-block;cursor:pointer}
+.cstrip i.ent{background:var(--ent);border-color:var(--ent)}.cstrip i.con{background:var(--con);border-color:var(--con)}.cstrip i.unj{background:var(--unj);border-color:var(--unj)}
+.cstrip i.on{outline:2px solid var(--fg);outline-offset:1px}
+.more{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;font-size:13px;cursor:default}
+.vr{display:grid;grid-template-columns:52px 110px 1fr;gap:10px;align-items:start;padding:5px 0;border-bottom:1px solid var(--line)}
+.vr:last-child{border-bottom:0}
+.vr .cid{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted)}
+.vr .ex{color:var(--muted)}
+.vr .ex .qt{display:block;margin-top:3px;color:var(--fg);font-size:12.5px;border-left:3px solid var(--line);padding-left:8px}
+.more details summary{color:var(--muted);font-size:12.5px;cursor:pointer;padding:4px 0}
+.cgrid{display:grid;grid-template-columns:repeat(var(--gridcols),minmax(0,1fr));gap:4px}
+.cell2{min-height:42px;border-radius:5px;border:1px solid var(--line);background:var(--card);padding:4px 6px;font-size:11px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.cell2 .id{font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.cell2 .dt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:10.5px}
+.cell2.ent{background:var(--ent-bg);border-color:var(--ent)}
+.cell2.con{background:var(--con-bg);border-color:var(--con)}
+.cell2.unj{background:var(--unj-bg);border-color:var(--unj)}
+.cell2.both{background:var(--ent-bg);border-color:var(--con);box-shadow:0 0 0 1px var(--con) inset}
+.cell2.on{outline:2px solid var(--fg);outline-offset:1px}
+.chunk{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:13px}
+.chunk.ent{border-color:var(--ent);box-shadow:0 0 0 1px var(--ent) inset}
+.chunk.con{border-color:var(--con);box-shadow:0 0 0 1px var(--con) inset}
+.chunk.unj{border-color:var(--unj)}
+.chunk.detail{margin-top:10px}
+.chunk .cid{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chunk .text{margin-top:4px;color:var(--fg);cursor:pointer}
+.chunk .text.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chunk .why{margin-top:6px;padding:6px 10px;border-left:3px solid var(--accent);background:var(--bg);font-size:12.5px}
+.chunk .why .pill{margin-right:6px}
+</style></head><body>
+<script type="application/json" id="record">__RECORD__</script>
+<script type="application/json" id="findings">__FINDINGS__</script>
+<script type="application/json" id="roster">{
+  "groups": [[null, null, ["faithfulness"]]],
+  "behavior": ["abstention_rate"],
+  "health": ["extraction_error_rate", "checker_failure_rate"],
+  "directions": {
+    "faithfulness": "higher is better",
+    "abstention_rate": "distribution — no direction",
+    "extraction_error_rate": "lower is better",
+    "checker_failure_rate": "lower is better"
+  },
+  "universes": {"abstention_rate": ["abstained", "evaluated", "errored"]}
+}</script>
+<header>
+  <h1 id="title"></h1><span class="muted" id="meta"></span>
+  <span class="sp"></span>
+  <span class="seg" id="runseg"></span>
+</header>
+<div id="stage">
+  <div class="screen" id="run"></div>
+  <div class="screen" id="item" hidden></div>
+</div>
+<div id="tip" hidden></div>
+<script>
+/*COMMON_JS*/
+</script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const q = new URLSearchParams(location.search);
+  let runIdx = Math.min(NRUNS - 1, Math.max(0, +(q.get("run") || 0)));
+  let sel = q.has("item") ? +q.get("item") : null;
+  let picked = q.has("claim") ? +q.get("claim") : null, openChunk = q.has("chunk") ? +q.get("chunk") : null;
+  let view = q.get("view") === "list" ? "list" : "grid", onlyRelevant = true;
+  const items = () => R.runs[runIdx].items;
+  const stage = $('stage');
+  $('title').textContent = titleFor("faithcheck");
+  $('meta').innerHTML = metaLine();
+
+  // ── claim status, read from the record and the findings ───────────
+  const DESC = {
+    grounded: "At least one retrieved chunk entails this claim; claim_support names them.",
+    ungrounded: "No retrieved chunk entails this claim: Neutral everywhere.",
+    contradicted: "A retrieved chunk contradicts this claim and no chunk entails it.",
+    undecidable: "No chunk entails it and at least one verdict is missing, so the score excludes it.",
+  };
+  const CLS = {grounded: "ent", ungrounded: "neu", contradicted: "con", undecidable: "unj"};
+  function statusMap(ri){ const fr = findingsOf(ri); const m = new Map();
+    for(const b of ["contradicted", "undecidable", "ungrounded"]) for(const e of fl(fr, b)) if(!m.has(e.query + SEP + e.claim)) m.set(e.query + SEP + e.claim, {branch: b, e});
+    return m; }
+  // Grounded = an Entailment cell in the claim's row, which is how the
+  // pipeline builds claim_support; by position, so duplicate doc_ids cannot collide.
+  function claimStatus(it, i, sm){
+    const by = positions(it, i, "Entailment");
+    if(by.length) return {name: "grounded", cls: "ent", by};
+    const f = sm.get(it.query + SEP + ct(it.response_claims[i]));
+    if(f) return {name: f.branch, cls: CLS[f.branch], e: f.e, by: positions(it, i, "Contradiction")};
+    return {name: "ungrounded", cls: "neu", by: []};
+  }
+  function statLabel(it, st, cells){
+    if(st.name === "grounded") return "entailed by " + st.by.map(shortChunk).join(", ");
+    if(st.name === "contradicted") return "contradicted by " + (st.by.length ? st.by.map(shortChunk).join(", ") : "a chunk");
+    if(st.name === "undecidable") return "undecidable · " + cells.filter(c => V(c).verdict == null).length + " of " + cells.length + " verdicts missing";
+    return "neutral in all " + cells.length + " chunks";
+  }
+  // Per chunk: how many claims it grounds and contradicts, read off the
+  // matrix by position, the same cells claim_support and claim_contradictions name.
+  function chunkTallies(it){
+    const n = (it.retrieved_context || []).length, grounds = new Array(n).fill(0), contradicts = new Array(n).fill(0);
+    (it.retrieved2response || []).forEach(row => (row || []).forEach((c, j) => { const v = V(c).verdict; if(v === "Entailment") grounds[j]++; else if(v === "Contradiction") contradicts[j]++; }));
+    return {grounds, contradicts};
+  }
+
+  // ── screen 1: the run ─────────────────────────────────────────────
+  function renderRun(){
+    const sm = statusMap(runIdx);
+    runScreen($('run'), R.runs[runIdx], {
+      dotLegend: "lime = grounded · red = contradicted · grey = ungrounded · amber = undecidable",
+      dot: (it, i) => claimStatus(it, i, sm).cls,
+      right: it => "faithfulness <b>" + fmt((it.metrics || {}).faithfulness) + "</b>",
+      abstainTitle: "The response declined to answer. Without ground truth this is a count, not a verdict.",
+      onOpen: go,
+    });
+  }
+
+  // ── screen 2: one item — the response, its claims, then the chunks ──
+  function verdictRow(it, i, j, withQuote){ const v = V(((it.retrieved2response || [])[i] || [])[j]);
+    return '<div class="vr"><span class="cid">' + shortChunk(j) + '</span><b style="color:var(--' + vcls(v.verdict) + ')">' + esc(vname(v.verdict)) + '</b><span class="ex">' + esc(v.explanation || "(no explanation recorded)") + (withQuote && (v.verdict === "Entailment" || v.verdict === "Contradiction") ? '<span class="qt">' + esc(ctxOf(it, j).text) + '</span>' : '') + '</span></div>'; }
+  function claimHtml(it, i, sm){
+    const st = claimStatus(it, i, sm), cells = (it.retrieved2response || [])[i] || [], on = picked === i;
+    let h = '<div class="claim ' + st.cls + (on ? " on" : "") + '" data-i="' + i + '"><div class="head"><span class="txt">' + esc(ct(it.response_claims[i])) + '</span><span class="pill ' + st.cls + '" title="' + esc(DESC[st.name]) + '">' + esc(statLabel(it, st, cells)) + '</span></div>';
+    h += '<div class="cstrip">' + cells.map((c, j) => { const v = V(c); return '<i class="' + vcls(v.verdict) + (on && openChunk === j ? " on" : "") + '" data-c="' + j + '" title="' + esc(shortChunk(j) + " · " + (ctxOf(it, j).doc_id || "") + " · " + vname(v.verdict)) + '"></i>'; }).join("") + '</div>';
+    if(on){
+      const rank = v => v === "Entailment" ? 0 : v === "Contradiction" ? 1 : v == null ? 2 : 3;
+      const order = cells.map((c, j) => j).sort((a, b) => rank(V(cells[a]).verdict) - rank(V(cells[b]).verdict) || a - b);
+      const loud = order.filter(j => V(cells[j]).verdict !== "Neutral"), quiet = order.filter(j => V(cells[j]).verdict === "Neutral");
+      h += '<div class="more">' + (loud.length ? loud.map(j => verdictRow(it, i, j, true)).join("") : '<div class="na">no chunk entails or contradicts this claim</div>')
+        + (quiet.length ? '<details' + (quiet.length <= 4 ? " open" : "") + '><summary>' + quiet.length + ' neutral chunk' + (quiet.length > 1 ? "s" : "") + '</summary>' + quiet.map(j => verdictRow(it, i, j, false)).join("") + '</details>' : '') + '</div>';
+    }
+    return h + '</div>';
+  }
+  function chunkDetail(it, j, t){
+    const cx = ctxOf(it, j), M = it.retrieved2response || [];
+    const v = picked != null ? V((M[picked] || [])[j]) : null;
+    let h = '<div class="chunk detail ' + (v ? vcls(v.verdict) : (t.grounds[j] && t.contradicts[j] ? "con" : t.grounds[j] ? "ent" : t.contradicts[j] ? "con" : "")) + '"><div class="cid">' + shortChunk(j) + ' · ' + esc(cx.doc_id) + tallyPills(t, j) + '</div><div class="text">' + esc(cx.text) + '</div>';
+    if(v) h += '<div class="why"><span class="pill ' + vcls(v.verdict) + '">' + esc(vname(v.verdict)) + '</span>claim ' + (picked + 1) + ': ' + esc(ct(it.response_claims[picked])) + '<div class="muted">' + esc(v.explanation || "(no explanation recorded)") + '</div></div>';
+    else { const rows = it.response_claims.map((cl, i) => ({i, v: V((M[i] || [])[j])})).filter(x => x.v.verdict !== "Neutral");
+      h += rows.length ? rows.map(x => '<div class="why"><span class="pill ' + vcls(x.v.verdict) + '">' + esc(vname(x.v.verdict)) + '</span>claim ' + (x.i + 1) + ': ' + esc(ct(it.response_claims[x.i])) + '<div class="muted">' + esc(x.v.explanation || "(no explanation recorded)") + '</div></div>').join("") : '<div class="why muted">Neutral for every claim</div>'; }
+    return h + '</div>';
+  }
+  function tallyPills(t, j){ return (t.grounds[j] ? ' <span class="pill ent" title="Number of response claims this chunk entails: Entailment cells in its column, what claim_support names.">grounds ' + t.grounds[j] + '</span>' : '') + (t.contradicts[j] ? ' <span class="pill con" title="Number of response claims this chunk contradicts: Contradiction cells in its column, what claim_contradictions names.">contradicts ' + t.contradicts[j] + '</span>' : ''); }
+  function renderItem(){
+    const it = items()[sel], m = it.metrics || {}, sm = statusMap(runIdx), ctx = it.retrieved_context || [], nctx = ctx.length, M = it.retrieved2response || [], t = chunkTallies(it);
+    let h = '<div class="itemhead">' + navHtml() + '<h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
+    h += '<div class="im">this item' + (NRUNS > 1 ? ', run ' + (runIdx + 1) : '') + ' · faithfulness <b>' + fmt(m.faithfulness) + '</b> · ' + it.response_claims.length + ' claims · ' + nctx + ' chunks</div>';
+    h += '<div class="resp">' + (it.response ? esc(it.response) : '<span class="na">(empty response' + (it.is_abstention ? ' — abstained' : '') + ')</span>') + '</div>';
+    h += '<h2 class="sec">Claims <span>· click a claim for every verdict · click a square to open that chunk</span></h2>';
+    h += it.response_claims.length ? it.response_claims.map((_, i) => claimHtml(it, i, sm)).join("") : '<div class="na">no claims' + (it.is_abstention ? ' — the response abstained' : '') + '</div>';
+    const pc = picked != null ? (M[picked] || []) : null;
+    h += '<h2 class="sec">Retrieved chunks <span>· ' + nctx + ' · ' + (pc ? 'colored for claim ' + (picked + 1) : t.grounds.filter(g => g > 0).length + ' ground a claim · ' + t.contradicts.filter(c => c > 0).length + ' contradict one') + '</span><span class="seg" id="view"><button class="' + (view === "grid" ? "on" : "") + '" data-v="grid">grid</button><button class="' + (view === "list" ? "on" : "") + '" data-v="list">list</button></span></h2>';
+    if(view === "grid"){
+      h += '<div class="cgrid">' + ctx.map((c, j) => { const cls = pc ? vcls(V(pc[j]).verdict) : (t.grounds[j] && t.contradicts[j] ? "both" : t.grounds[j] ? "ent" : t.contradicts[j] ? "con" : "");
+        return '<div class="cell2 ' + cls + (openChunk === j ? " on" : "") + '" data-c="' + j + '" title="' + esc(shortChunk(j) + " · " + (c.doc_id || "") + (pc ? " · " + vname(V(pc[j]).verdict) : (t.grounds[j] ? " · grounds " + t.grounds[j] : "") + (t.contradicts[j] ? " · contradicts " + t.contradicts[j] : ""))) + '"><span class="id">' + shortChunk(j) + '</span><span class="dt">' + esc(c.doc_id || "") + '</span></div>'; }).join("") + '</div>';
+      if(openChunk != null && openChunk < nctx) h += chunkDetail(it, openChunk, t);
+    } else {
+      const shown = ctx.map((_, j) => j).filter(j => !(pc && onlyRelevant && V(pc[j]).verdict === "Neutral"));
+      if(pc) h += '<div class="muted" style="font-size:12px;margin-bottom:6px">' + (onlyRelevant ? shown.length + ' chunk' + (shown.length === 1 ? '' : 's') + ' with a verdict other than Neutral · <button class="btn" id="showall" style="font-size:12px">show all ' + nctx + '</button>' : 'all ' + nctx + ' shown · <button class="btn" id="showall" style="font-size:12px">only relevant</button>') + '</div>';
+      if(pc && !shown.length) h += '<div class="na">every chunk is Neutral for this claim</div>';
+      for(const j of shown){ const cx = ctxOf(it, j), v = pc ? V(pc[j]) : null;
+        h += '<div class="chunk ' + (v ? vcls(v.verdict) : "") + '" id="chunk' + j + '"><div class="cid">' + shortChunk(j) + ' · ' + esc(cx.doc_id) + tallyPills(t, j) + (v ? ' <span class="pill ' + vcls(v.verdict) + '">' + esc(vname(v.verdict)) + ' for claim ' + (picked + 1) + '</span>' : '') + '</div><div class="text ' + (v && v.verdict !== "Neutral" ? '' : 'clamp') + '">' + esc(cx.text) + '</div>' + (v && v.verdict !== "Neutral" ? '<div class="why">' + esc(v.explanation || "(no explanation recorded)") + '</div>' : '') + '</div>'; }
+    }
+    $('item').innerHTML = h;
+    $('back').addEventListener("click", back); $('prev').addEventListener("click", () => go(sel - 1)); $('next').addEventListener("click", () => go(sel + 1));
+    const sa = $('showall'); if(sa) sa.addEventListener("click", () => { onlyRelevant = !onlyRelevant; renderItem(); });
+  }
+
+  $('item').addEventListener("click", e => {
+    const vb = e.target.closest("#view button"); if(vb){ view = vb.dataset.v; renderItem(); return; }
+    const sq = e.target.closest(".cstrip i");
+    if(sq){ picked = +sq.closest(".claim").dataset.i; openChunk = +sq.dataset.c; onlyRelevant = false; renderItem();
+      const el = view === "grid" ? $('item').querySelector(".chunk.detail") : $('chunk' + openChunk); if(el) el.scrollIntoView({behavior: "smooth", block: "center"}); return; }
+    const cell = e.target.closest(".cell2"); if(cell){ const j = +cell.dataset.c; openChunk = (openChunk === j) ? null : j; renderItem(); return; }
+    const tx = e.target.closest(".chunk .text"); if(tx && !tx.closest(".detail")){ tx.classList.toggle("clamp"); return; }
+    if(e.target.closest(".more") || e.target.closest(".chunk")) return;
+    const c = e.target.closest(".claim"); if(c){ const i = +c.dataset.i; picked = (picked === i) ? null : i; openChunk = null; onlyRelevant = true; renderItem(); }
+  });
+
+  // ── navigation ────────────────────────────────────────────────────
+  function go(i){ const n = items().length; if(!n) return; const same = sel === i; sel = ((i % n) + n) % n; if(!same){ picked = null; openChunk = null; onlyRelevant = true; } $('run').hidden = true; $('item').hidden = false; renderItem(); stage.scrollTop = 0; }
+  function back(){ sel = null; picked = null; openChunk = null; $('item').hidden = true; $('run').hidden = false; renderRun(); }
+  $('runseg').addEventListener("click", e => { const b = e.target.closest("button[data-r]"); if(!b) return; runIdx = +b.dataset.r; runSeg($('runseg'), runIdx); if(sel == null) renderRun(); else { picked = null; openChunk = null; go(sel); } });
+  document.addEventListener("keydown", e => { if(sel == null || e.target.tagName === "SELECT") return; if(e.key === "ArrowRight") go(sel + 1); else if(e.key === "ArrowLeft") go(sel - 1); else return; e.preventDefault(); });
+
+  runSeg($('runseg'), runIdx);
+  if(sel != null && items()[sel]){ const keep = {picked, openChunk}; go(sel); if(keep.picked != null || keep.openChunk != null){ picked = keep.picked; openChunk = keep.openChunk; renderItem(); } }
+  else { sel = null; renderRun(); }
+})();
+</script>
+</body></html>

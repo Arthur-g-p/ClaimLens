@@ -437,6 +437,7 @@ def faithcheck(
     ctx: typer.Context,
     input_file: Path = typer.Argument(..., help="Path to JSON input file (needs 'response' + 'retrieved_context'; no ground truth)."),
     output_file: Path = typer.Option(None, "--output", "-o", help="Report path. Defaults to results/{input_stem}_faithcheck[_{runs}].json. A *_findings.json sibling (the review queue) is written alongside."),
+    html: bool = typer.Option(True, "--html/--no-html", help="Also write {report_stem}.html, a self-contained viewer of the report. Default: on."),
     extractor_model: str = typer.Option(..., "--extractor-model", "-e", help="Model for response claim extraction."),
     checker_model: str = typer.Option(..., "--checker-model", "-c", help="Model for the retrieved2response checks."),
     extractor_base_api: str = typer.Option(None, "--extractor-base-api", help="Optional base URL for the extractor LLM API."),
@@ -489,17 +490,20 @@ def faithcheck(
         logger.error("❌ %s: %s", type(exc).__name__, exc)
         raise typer.Exit(code=1)
 
-    # The record is the source; the findings file is a view derived from it.
+    # The record is the source; the findings file and the HTML page are views derived from it.
     _args = _capture_args(ctx, "faithcheck")
+    record = {"_args": _args, **report}
+    findings = {"_args": _args, **pipeline.last_findings}
     findings_file = output_file.with_name(output_file.stem + "_findings.json")
-    output_file.write_text(
-        json.dumps({"_args": _args, **report}, indent=2, ensure_ascii=False),
-        encoding="utf-8")
-    findings_file.write_text(
-        json.dumps({"_args": _args, **pipeline.last_findings}, indent=2, ensure_ascii=False),
-        encoding="utf-8")
+    output_file.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    findings_file.write_text(json.dumps(findings, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info("Written: %s", output_file)
     logger.info("Written: %s", findings_file)
+    if html:
+        html_file = output_file.with_suffix(".html")
+        html_file.write_text(render_html(record, findings), encoding="utf-8")
+        logger.info("Written: %s", html_file)
+        logger.info("Open:    %s", html_file.resolve().as_uri())
 
 
 # ── Eval subcommand group ────────────────────────────────────────────────────

@@ -50,3 +50,54 @@ details>summary{cursor:pointer;color:var(--muted);font-size:12.5px}
 pre.tree{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.5;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 12px;overflow-x:auto;margin:0}
 .fcard{padding:10px 0;border-bottom:1px solid var(--line)}
 .fcard .fq{font-size:12px;color:var(--muted)}
+/* ── page frame shared by the report templates ─────────────────────── */
+html,body{height:100%}
+body{display:flex;flex-direction:column;overflow:hidden}
+header{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px}
+header .sp{flex:1}
+#stage{flex:1;overflow:auto;position:relative}
+.screen{padding:18px 24px 60px;max-width:1240px;margin:0 auto}
+:root{--gt:#8b5cf6;--pred:#1e5f8a}
+@media (prefers-color-scheme:dark){:root{--gt:#b794f6;--pred:#4a9de0}}
+/* ── run screen ────────────────────────────────────────────────────── */
+.mlead{font-size:12px;color:var(--muted);margin-bottom:10px}
+.cluster{margin-bottom:16px}
+.cluster h2{font-size:12.5px;margin:0 0 6px}
+.cluster h2 span{font-weight:400;color:var(--muted)}
+.band{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.cell{flex:0 0 158px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.cell .k{font-size:11.5px;color:var(--muted)}
+.cell .k .mono{color:var(--fg)}
+.cell .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1;margin:4px 0 2px}
+.cell .v small{font-size:11.5px;font-weight:400;color:var(--muted);margin-left:4px}
+.cell .bar{height:7px;margin-top:6px}
+.bar>i.flat{background:var(--neu)}
+.cell .dots{margin-top:5px}
+.cell .n{font-size:11px;color:var(--muted);margin-top:4px}
+.items h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
+.items h2 span{text-transform:none;letter-spacing:0;font-weight:400}
+.items{margin-top:22px}
+.items h2{display:flex;align-items:baseline;gap:8px}
+.items h2 .hd{text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.row{display:grid;grid-template-columns:2.4em 1fr auto auto;gap:12px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:6px;cursor:pointer}
+.row:hover{border-color:var(--accent)}
+.row .q{font-size:13.5px}
+.row .dots2{display:flex;gap:4px;align-items:center;flex-wrap:wrap;max-width:300px}
+.row .dots2 i{width:11px;height:11px;border-radius:50%;background:var(--neu);display:inline-block}
+.row .dots2 i.ent{background:var(--ent)}.row .dots2 i.con{background:var(--con)}.row .dots2 i.unj{background:var(--unj)}
+.row .f{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.row .f b{color:var(--fg)}
+/* ── item screen frame ─────────────────────────────────────────────── */
+.itemhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.itemhead h2{font-size:15px;margin:0}
+.im{font-size:12px;color:var(--muted);margin-bottom:14px}
+.im b{color:var(--fg);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;border-radius:3px;padding:0 6px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap}
+.pill.ent{background:var(--ent-bg);color:var(--ent)}.pill.con{background:var(--con-bg);color:var(--con)}.pill.neu{background:var(--neu-bg);color:var(--muted)}.pill.unj{background:var(--unj-bg);color:var(--unj)}
+/* ── tooltip ───────────────────────────────────────────────────────── */
+#tip{position:fixed;z-index:10;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.2);pointer-events:none}
+#tip .r{margin:4px 0}
+#tip .r+.r{border-top:1px solid var(--line);padding-top:4px}
+#tip .sec+.sec{border-top:3px double var(--line);margin-top:8px;padding-top:6px}
+#tip .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}

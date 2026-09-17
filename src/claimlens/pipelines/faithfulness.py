@@ -39,6 +39,8 @@ from claimlens.pipelines.directions import (
     unwrap_items,
 )
 from claimlens.pipelines.ragchecker import _ENTAILMENT, _ratio, _row_entailed
+
+_CONTRADICTION = "Contradiction"
 from claimlens.stats import GLOBAL_STATS, format_headline, log_mece_tree, log_rate_rows, log_token_stats, usage_since
 from claimlens.utils import build_meta, findings_view, plural
 
@@ -53,7 +55,9 @@ class FaithfulnessPipeline(BaseService):
     # Behavior carries only the abstention rate — the justified/
     # unjustified split is unknowable without GT.
     _METRIC_DIRECTIONS = {"faithfulness": "higher is better",
-                          "abstention_rate": "distribution — no direction"}
+                          "abstention_rate": "distribution — no direction",
+                          "extraction_error_rate": "lower is better",
+                          "checker_failure_rate": "lower is better"}
     _VARIANCE_SECTIONS = {
         "metrics": [(None, ["faithfulness"])],
         "behavior": ["abstention_rate"],
@@ -336,6 +340,7 @@ class FaithfulnessPipeline(BaseService):
 
         matrix = []
         claim_support = []
+        claim_contradictions = []
         for triplet in claims:
             verdicts = triplet.get(f"{self._namespace}_verdicts") or {}
             explanations = triplet.get(f"{self._namespace}_explanations") or {}
@@ -354,6 +359,10 @@ class FaithfulnessPipeline(BaseService):
                 [d for idx, d in enumerate(doc_ids)
                  if verdicts.get(idx) == _ENTAILMENT]
             )
+            claim_contradictions.append(
+                [d for idx, d in enumerate(doc_ids)
+                 if verdicts.get(idx) == _CONTRADICTION]
+            )
 
         entry = {
             "query_id": str(item.get("query_id", item.get("id", ""))),
@@ -368,6 +377,7 @@ class FaithfulnessPipeline(BaseService):
             "retrieved2response": matrix,
             # Per-claim attribution: which chunks ground each claim.
             "claim_support": claim_support,
+            "claim_contradictions": claim_contradictions,
         }
         if self._response_err in item:
             entry["extraction_errors"] = {"response": item[self._response_err]}

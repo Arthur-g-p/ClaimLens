@@ -188,14 +188,16 @@ the console's own branch names, derived from the record. The building
 blocks (`extract`, `check`, `atomize`) instead emit the item list itself,
 enriched in place, so each one's output is the next one's input.
 
-`ragcheck` writes a third file next to those two: `{report_stem}.html`, a
-self-contained viewer of the same record. One screen for the run — the main
+`ragcheck` and `faithcheck` write a third file next to those two:
+`{report_stem}.html`, a self-contained viewer of the same record. One screen for the run — the main
 metrics with their spread over `--runs`, then every item as a row of dots,
 one per response claim, lime when a chunk grounds it — and one screen per
 item: GT claims, retrieved chunks and response claims in three columns with
 the verdicts drawn as lines between them, hover for the checker's
-explanation. It opens with a double-click, needs no server and loads nothing
-from the network. `--no-html` skips it.
+explanation. `faithcheck`'s item screen is the response text, then its claims
+and the retrieved chunks, each highlighted by whether a chunk entails or
+contradicts the claim. Both open with a double-click, need no server and load
+nothing from the network. `--no-html` skips them.
 `claimlens --help` lists all commands and flags.
 
 ## Use it from Python
@@ -218,7 +220,7 @@ items = claimlens.extract(items, extractor_model="gpt-4o-mini")
 
 `ragcheck`, `faithcheck` and `refcheck` return the record and the findings,
 the two documents the CLI writes. `claimlens.render_html(record, findings)`
-returns the viewer page for a `ragcheck` record as a string, the same page
+returns the viewer page for a `ragcheck` or `faithcheck` record as a string, the same page
 the CLI writes as `{report_stem}.html`. `extract` and `check` return the enriched
 item list. Extra keyword arguments go to the pipeline (`concurrency`,
 `joint`, `extractor_base_url`, `runs`, ...). Output is silent until you ask

@@ -42,6 +42,7 @@ entry = check_faithfulness(
 
 entry["metrics"]["faithfulness"]   # 0.5  — 1 of 2 claims grounded
 entry["claim_support"]             # [["000"], []] — which chunks ground each claim
+entry["claim_contradictions"]      # [[], []]      — which chunks contradict each claim
 entry["is_abstention"]             # explicit refusal detection
 ```
 
@@ -67,15 +68,27 @@ list at `--runs 1` too; `--runs N` adds entries and reshapes nothing.
   answered), `reliability` (the two 💥 rows).
 - `items` — one entry per evaluated item: dict claims, the
   `retrieved2response` verdict-object matrix, explicit `is_abstention`,
-  sparse `extraction_errors`, per-item `metrics`, and `claim_support` —
+  sparse `extraction_errors`, per-item `metrics`, `claim_support` —
   parallel to `response_claims`, for each claim the list of doc_ids whose
   chunk entails it: the per-claim attribution answer to "which retrieved
-  document grounds this statement?".
+  document grounds this statement?" — and `claim_contradictions`, the same
+  shape for the chunks whose verdict is Contradiction.
 - `findings` — the review queue, one list per branch: `ungrounded` (no chunk
   entails the claim), `contradicted` (a chunk contradicts it, named with
   its explanation), `undecidable` (no chunk entails it and a verdict is
   missing, so the score excludes it), `abstained`, `extraction_failed`.
   Empty branches stay present.
+
+The CLI also writes `{report_stem}.html` unless `--no-html` is given: a
+self-contained viewer rendered from the record and the findings by
+`claimlens.viewer.render_html`. The run screen is the shared one (metrics,
+reliability, one bar per item, one dot per claim); the item screen is the
+response text, then each claim with its status and one square per chunk,
+then the chunks as a grid or list, colored by their verdict for the picked
+claim. Grounded comes from `claim_support`; contradicted, undecidable and
+ungrounded come from the findings branches. The template lives in
+`src/claimlens/templates/faithcheck.html` and declares the `schema_version`
+it reads.
 
 ## Metrics
 

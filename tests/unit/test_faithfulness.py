@@ -121,6 +121,32 @@ class TestBuildRun:
         entry = pipeline._build_run([_checked_item()])["items"][0]
         assert entry["claim_support"] == [["000"], []]
 
+    def test_claim_contradictions_attribution(self, pipeline):
+        item = _checked_item()
+        item[RESPONSE_KG][1][f"{NAMESPACE}_verdicts"] = {0: "Contradiction", 1: "Neutral"}
+        entry = pipeline._build_run([item])["items"][0]
+        assert entry["claim_support"] == [["000"], []]
+        assert entry["claim_contradictions"] == [[], ["000"]]
+
+    def test_chunk_names_do_not_affect_results(self, pipeline):
+        # Verdicts are keyed by position; doc_ids are labels. The same
+        # verdicts under duplicate names give the same matrix and metric,
+        # and the name-level attribution repeats the shared name once per
+        # position it stands for.
+        unique = pipeline._build_run([_checked_item()])["items"][0]
+        item = _checked_item()
+        item["retrieved_context"] = [{"doc_id": "same", "text": "a"}, {"doc_id": "same", "text": "b"}]
+        dup = pipeline._build_run([item])["items"][0]
+        assert dup["metrics"] == unique["metrics"]
+        assert dup["retrieved2response"] == unique["retrieved2response"]
+        assert dup["claim_support"] == [["same"], []]
+        both = _checked_item()
+        both["retrieved_context"] = [{"doc_id": "same", "text": "a"}, {"doc_id": "same", "text": "b"}]
+        both[RESPONSE_KG][0][f"{NAMESPACE}_verdicts"] = {0: "Entailment", 1: "Entailment"}
+        entry = pipeline._build_run([both])["items"][0]
+        assert entry["metrics"]["faithfulness"] == 0.5
+        assert entry["claim_support"] == [["same", "same"], []]
+
     def test_abstention_is_null(self, pipeline):
         item = _full_item(**{RESPONSE_KG: [], "is_abstention": True})
         entry = pipeline._build_run([item])["items"][0]

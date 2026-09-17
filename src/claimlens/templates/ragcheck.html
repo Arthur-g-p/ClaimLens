@@ -4,43 +4,6 @@
 <title>claimlens · ragcheck</title>
 <style>
 /*COMMON_CSS*/
-html,body{height:100%}
-body{display:flex;flex-direction:column;overflow:hidden}
-header{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-header h1{font-size:15px}
-header .sp{flex:1}
-#stage{flex:1;overflow:auto;position:relative}
-.screen{padding:18px 24px 60px;max-width:1240px;margin:0 auto}
-.mlead{font-size:12px;color:var(--muted);margin-bottom:10px}
-.cluster{margin-bottom:16px}
-.cluster h2{font-size:12.5px;margin:0 0 6px}
-.cluster h2 span{font-weight:400;color:var(--muted)}
-.band{display:flex;flex-wrap:wrap;gap:10px}
-.cell{flex:0 0 158px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.cell .k{font-size:11.5px;color:var(--muted)}
-.cell .k .mono{color:var(--fg)}
-.cell .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1;margin:4px 0 2px}
-.cell .v small{font-size:11.5px;font-weight:400;color:var(--muted);margin-left:4px}
-.cell .bar{height:7px;margin-top:6px}
-.cell .dots{margin-top:5px}
-.cell .n{font-size:11px;color:var(--muted);margin-top:4px}
-.health{font-size:12.5px;color:var(--muted);margin:2px 0 0}
-.health b{color:var(--fg);font-variant-numeric:tabular-nums}
-.items{margin-top:22px}
-.items h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 6px}
-.items h2 span{text-transform:none;letter-spacing:0;font-weight:400}
-.row{display:grid;grid-template-columns:2.4em 1fr auto auto;gap:12px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:6px;cursor:pointer}
-.row:hover{border-color:var(--accent)}
-.row .q{font-size:13.5px}
-.row .dots2{display:flex;gap:4px;align-items:center}
-.row .dots2 i{width:11px;height:11px;border-radius:50%;background:var(--neu);display:inline-block}
-.row .dots2 i.ent{background:var(--ent)}.row .dots2 i.con{background:var(--con)}.row .dots2 i.unj{background:var(--unj)}
-.row .f{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
-.row .f b{color:var(--fg)}
-.itemhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
-.itemhead h2{font-size:15px;margin:0}
-.im{font-size:12px;color:var(--muted);margin-bottom:14px}
-.im b{color:var(--fg);font-variant-numeric:tabular-nums}
 .legend{display:flex;gap:12px;font-size:12px;color:var(--muted);align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .legend i{display:inline-block;width:16px;height:0;border-top:3px solid;margin-right:5px;vertical-align:middle}
 #cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:80px;position:relative;align-items:start;min-width:760px}
@@ -54,9 +17,14 @@ header .sp{flex:1}
 .node .cid{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted)}
 .node .ex{color:var(--muted);font-size:12px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .node.open .ex{display:block;-webkit-line-clamp:unset}
+.node .pills{display:block;margin-top:5px}
 #cols.focus .node:not(.hi){opacity:.28}
 .node.hi{box-shadow:0 0 0 2px var(--accent)}
 .node.chunk.rel.hi{box-shadow:0 0 0 2px var(--accent),0 0 0 1px var(--ent) inset}
+#cg h3{color:var(--gt)}#cp h3{color:var(--pred)}
+#cg .src{border:1.5px solid var(--gt)}#cp .src{border:1.5px solid var(--pred)}
+#cg .node{border-top-color:var(--gt);border-right-color:var(--gt);border-bottom-color:var(--gt)}
+#cp .node{border-top-color:var(--pred);border-right-color:var(--pred);border-bottom-color:var(--pred)}
 svg#edges{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
 svg#edges path{fill:none;stroke-width:2.5;opacity:.8;pointer-events:stroke;cursor:pointer;transition:opacity .12s}
 svg#edges path.ent{stroke:var(--ent)}
@@ -66,18 +34,6 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
 #cols.focus svg#edges path:not(.hi){opacity:.07}
 #cols.focus svg#edges path.hi{opacity:1;stroke-width:3.5}
 #cols.focus svg#edges path.neu.hi{opacity:.55;stroke-width:2}
-#tip{position:fixed;z-index:10;max-width:400px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 6px 24px rgba(0,0,0,.2);pointer-events:none}
-#tip .r{margin:4px 0}
-#tip .r+.r{border-top:1px solid var(--line);padding-top:4px}
-:root{--gt:#8b5cf6;--pred:#1e5f8a}
-@media (prefers-color-scheme:dark){:root{--gt:#b794f6;--pred:#4a9de0}}
-#cg h3{color:var(--gt)}#cp h3{color:var(--pred)}
-#cg .src{border:1.5px solid var(--gt)}#cp .src{border:1.5px solid var(--pred)}
-#cg .node{border-top-color:var(--gt);border-right-color:var(--gt);border-bottom-color:var(--gt)}
-#cp .node{border-top-color:var(--pred);border-right-color:var(--pred);border-bottom-color:var(--pred)}
-.node .pills{display:block;margin-top:5px}
-#tip .sec+.sec{border-top:3px double var(--line);margin-top:8px;padding-top:6px}
-#tip .sh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
 </style></head><body>
 <script type="application/json" id="record">__RECORD__</script>
 <script type="application/json" id="findings">__FINDINGS__</script>
@@ -92,6 +48,7 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
       "noise_sensitivity_in_relevant", "noise_sensitivity_in_irrelevant",
       "refused_with_relevant_chunks_rate", "justified_abstention_rate", "unwarranted_answer_rate"]]
   ],
+  "behavior": [],
   "health": ["extraction_error_rate", "checker_failure_rate"],
   "directions": {
     "precision": "higher is better", "recall": "higher is better", "f1": "higher is better",
@@ -131,27 +88,14 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
 <script>
 (function(){
   const $ = id => document.getElementById(id);
-  // The roster island mirrors RagCheckerPipeline._VARIANCE_SECTIONS and
-  // _METRIC_DIRECTIONS; tests/unit/test_viewer.py asserts they are equal.
-  const ROSTER = JSON.parse(document.getElementById('roster').textContent);
-  const DIR = ROSTER.directions;
-  const arrow = k => { const d = DIR[k]; return d === "higher is better" ? "↑" : d === "lower is better" ? "↓" : d ? "↕" : ""; };
-  const LOWER = k => DIR[k] === "lower is better";
-
   const q = new URLSearchParams(location.search);
   let runIdx = Math.min(NRUNS - 1, Math.max(0, +(q.get("run") || 0)));
   let sel = q.has("item") ? +q.get("item") : null;
   let pinned = null, EDGES = [];
   const items = () => R.runs[runIdx].items;
-  const stage = $('stage'), tip = $('tip');
-
-  const inputName = String((R._args || {}).input_file || "").split("/").pop();
-  $('title').textContent = "claimlens · ragcheck" + (inputName ? " · " + inputName : "");
+  const stage = $('stage');
+  $('title').textContent = titleFor("ragcheck");
   $('meta').innerHTML = metaLine();
-
-  function renderRunSeg(){
-    $('runseg').innerHTML = NRUNS > 1 ? R.runs.map((_, i) => '<button class="' + (i === runIdx ? "on" : "") + '" data-r="' + i + '">Run ' + (i + 1) + "</button>").join("") : "";
-  }
 
   // ── screen 1: the run ─────────────────────────────────────────────
   // Grounded means at least one chunk entails the claim, the definition
@@ -164,40 +108,12 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
     }
     return ent ? "ent" : con ? "con" : unj ? "unj" : "neu";
   }
-  // The console's rule: abstention rates always show their fraction of a
-  // universe (answerable / unanswerable); paper metrics show support only
-  // when it is short of the item count.
-  function supportNote(run, k){
-    const u = ROSTER.universes[k];
-    if(u){ const ab = (run.counts || {}).abstention || {}; return ab[u[0]] + ' of ' + ab[u[1]] + ' ' + u[1]; }
-    const s = support(run, k), n = run._meta.evaluated_items;
-    return (s == null || s === n) ? '' : s + ' of ' + n + ' items';
-  }
-  function metricCell(k, run){
-    const m = R.metrics[k], vr = R.variance[k];
-    return '<div class="cell" title="' + (DIR[k] || "") + '"><div class="k"><span class="mono">' + k + '</span> ' + arrow(k) + '</div>'
-      + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(3)) + (NRUNS > 1 && vr && vr.std != null ? '<small>± ' + vr.std.toFixed(3) + '</small>' : '') + '</div>'
-      + (m == null ? '' : '<div class="bar"><i class="' + (LOWER(k) ? "bad" : "") + '" style="width:' + (m * 100) + '%"></i></div>')
-      + (NRUNS > 1 ? dotsHtml(vr, m) : '')
-      + '<div class="n">' + supportNote(run, k) + '</div></div>';
-  }
-  function healthNote(run, k){
-    const rl = (run.counts || {}).reliability || {};
-    if(k === "extraction_error_rate" && rl.extraction) return rl.extraction.failed + ' of ' + rl.extraction.items + ' items failed';
-    if(k === "checker_failure_rate" && rl.checking) return rl.checking.unjudged + ' of ' + rl.checking.issued + ' verdicts unjudged';
-    return '';
-  }
   function renderRun(){
-    const run = R.runs[runIdx];
-    let h = '<div class="mlead">Metrics · ' + (NRUNS > 1 ? 'mean over ' + NRUNS + ' runs · support and counts from run ' + (runIdx + 1) : 'macro over ' + run._meta.evaluated_items + ' items') + '</div>';
-    ROSTER.groups.forEach(([name, desc, keys]) => {
-      h += '<div class="cluster"><h2>' + name + ' <span>— ' + esc(desc) + '</span></h2><div class="band">' + keys.map(k => metricCell(k, run)).join("") + '</div></div>'; });
-    h += '<div class="health">Reliability · ' + ROSTER.health.map(k => '<span class="mono">' + k + '</span> ' + arrow(k) + ' <b>' + fmt(R.metrics[k], 3) + '</b>' + (healthNote(run, k) ? ' (' + healthNote(run, k) + ')' : '')).join(' · ') + '</div>';
-    h += '<div class="items"><h2>Items <span>· one dot per response claim, lime = grounded in a chunk' + (NRUNS > 1 ? ' · run ' + (runIdx + 1) : '') + '</span></h2>';
-    items().forEach((it, i) => { const m = it.metrics || {};
-      const dots = it.is_abstention ? '<span class="tag warn" title="The response declined to answer.">abstained</span>' : (it.response_claims.length ? it.response_claims.map((_, ci) => '<i class="' + groundClass(it, ci) + '"></i>').join("") : '<span class="na">no claims</span>');
-      h += '<div class="row" data-i="' + i + '"><span class="muted">#' + (i + 1) + '</span><span class="q">' + esc(it.query) + '</span><span class="dots2">' + dots + '</span><span class="f">f1 <b>' + fmt(m.f1) + '</b> · hallucination <b>' + fmt(m.hallucination) + '</b></span></div>'; });
-    $('run').innerHTML = h + "</div>";
+    runScreen($('run'), R.runs[runIdx], {
+      dotLegend: "lime = grounded in a chunk", dot: groundClass,
+      right: it => { const m = it.metrics || {}; return "f1 <b>" + fmt(m.f1) + "</b> · hallucination <b>" + fmt(m.hallucination) + "</b>"; },
+      onOpen: go,
+    });
   }
 
   // ── screen 2: one item ────────────────────────────────────────────
@@ -207,7 +123,7 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
   }
   function renderItem(){
     const it = items()[sel], m = it.metrics || {}, tags = findingTags(runIdx);
-    let h = '<div class="itemhead"><button class="btn" id="back">‹ run</button><button class="btn" id="prev" title="previous item">‹</button><button class="btn" id="next" title="next item">›</button><h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
+    let h = '<div class="itemhead">' + navHtml() + '<h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
     h += '<div class="im">this item' + (NRUNS > 1 ? ', run ' + (runIdx + 1) : '') + ' · precision <b>' + fmt(m.precision) + '</b> · recall <b>' + fmt(m.recall) + '</b> · f1 <b>' + fmt(m.f1) + '</b> · faithfulness <b>' + fmt(m.faithfulness) + '</b> · hallucination <b>' + fmt(m.hallucination) + '</b></div>';
     h += '<div class="legend"><span><i style="border-color:var(--ent)"></i>Entailment</span><span><i style="border-color:var(--con)"></i>Contradiction</span><span><i style="border-color:var(--neu);border-top-style:dashed;border-top-width:2px"></i>Neutral, on hover</span><span><i style="border-color:var(--unj);border-top-style:dotted"></i>unjudged</span></div>';
     let g = '<h3>GT answer <span class="n">' + it.gt_answer_claims.length + ' claims</span></h3><div class="src">' + (it.gt_answer ? esc(it.gt_answer) : "<i>(empty — unanswerable)</i>") + "</div>";
@@ -243,9 +159,6 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
   }
 
   // ── hover, pin, tooltip ───────────────────────────────────────────
-  function placeTip(x, y){ const w = tip.offsetWidth, hh = tip.offsetHeight; let L = x + 14, T = y + 14; if(L + w > innerWidth - 8) L = x - w - 14; if(T + hh > innerHeight - 8) T = Math.max(8, y - hh - 14); tip.style.left = L + "px"; tip.style.top = T + "px"; }
-  function showTip(html, x, y){ tip.innerHTML = html; tip.hidden = false; placeTip(x, y); }
-  function hideTip(){ tip.hidden = true; }
   function clearHi(){ const cols = $('cols'); if(cols) cols.querySelectorAll(".hi").forEach(n => n.classList.remove("hi")); }
   function focusNode(id){ const cols = $('cols'); if(!cols) return; cols.classList.add("focus"); clearHi();
     const me = cols.querySelector('[data-id="' + id + '"]'); if(me) me.classList.add("hi");
@@ -263,7 +176,7 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
   $('item').addEventListener("mouseover", e => { const n = e.target.closest(".node"), p = e.target.closest("path");
     if(n){ focusNode(n.dataset.id); showTip(nodeTip(n.dataset.id), e.clientX, e.clientY); }
     else if(p){ const ed = EDGES[+p.dataset.k]; p.classList.add("hi"); showTip('<div class="r"><span class="muted">' + esc(ed.label) + '</span> <b style="color:var(--' + ed.cls + ')">' + esc(ed.v) + "</b></div><div>" + esc(ed.expl || "(no explanation recorded)") + "</div>", e.clientX, e.clientY); } });
-  $('item').addEventListener("mousemove", e => { if(!tip.hidden) placeTip(e.clientX, e.clientY); });
+  $('item').addEventListener("mousemove", e => { if(!tipHidden()) placeTip(e.clientX, e.clientY); });
   $('item').addEventListener("mouseout", e => { const n = e.target.closest(".node"), p = e.target.closest("path"); if(!n && !p) return; hideTip(); if(n) unfocus(); if(p && !pinned) p.classList.remove("hi"); });
   $('item').addEventListener("click", e => { const n = e.target.closest(".node"); if(!n) return;
     if(n.classList.contains("chunk")){ n.classList.toggle("open"); requestAnimationFrame(drawEdges); return; }
@@ -272,16 +185,15 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
   // ── navigation ────────────────────────────────────────────────────
   function go(i){ const n = items().length; if(!n) return; sel = ((i % n) + n) % n; $('run').hidden = true; $('item').hidden = false; renderItem(); stage.scrollTop = 0; }
   function back(){ sel = null; pinned = null; hideTip(); $('item').hidden = true; $('run').hidden = false; renderRun(); }
-  $('run').addEventListener("click", e => { const r = e.target.closest(".row"); if(r) go(+r.dataset.i); });
-  $('runseg').addEventListener("click", e => { const b = e.target.closest("button[data-r]"); if(!b) return; runIdx = +b.dataset.r; renderRunSeg(); if(sel == null) renderRun(); else go(sel); });
+  $('runseg').addEventListener("click", e => { const b = e.target.closest("button[data-r]"); if(!b) return; runIdx = +b.dataset.r; runSeg($('runseg'), runIdx); if(sel == null) renderRun(); else go(sel); });
   document.addEventListener("keydown", e => {
     if(sel == null) return;
     if(e.key === "ArrowRight") go(sel + 1); else if(e.key === "ArrowLeft") go(sel - 1); else return;
     e.preventDefault(); });
   window.addEventListener("resize", () => requestAnimationFrame(drawEdges));
-  stage.addEventListener("scroll", () => { if(!tip.hidden) hideTip(); });
+  stage.addEventListener("scroll", () => { if(!tipHidden()) hideTip(); });
 
-  renderRunSeg();
+  runSeg($('runseg'), runIdx);
   if(sel != null && items()[sel]){ go(sel); const f = q.get("focus"); if(f) requestAnimationFrame(() => { pinned = f; focusNode(f); }); }
   else { sel = null; renderRun(); }
 })();
