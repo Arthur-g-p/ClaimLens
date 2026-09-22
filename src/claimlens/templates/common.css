@@ -1,6 +1,6 @@
-:root{--bg:#f7faf3;--fg:#151a12;--muted:#66705f;--line:#dfe6d6;--card:#ffffff;--accent:#65a30d;--sel:#eef7dd;--lime:#a3e635;
+:root{--bg:#f7faf3;--fg:#151a12;--muted:#66705f;--line:#dfe6d6;--card:#ffffff;--accent:#65a30d;--sel:#ebebe8;--hi:#1f2328;--lime:#a3e635;
 --ent:#65a30d;--con:#dc2626;--neu:#8b928a;--unj:#b45309;--ent-bg:#ecfccb;--con-bg:#fee2e2;--neu-bg:#eceee9;--unj-bg:#fef3c7}
-@media (prefers-color-scheme:dark){:root{--bg:#0e100e;--fg:#e9eee4;--muted:#8f998b;--line:#262b24;--card:#161a15;--accent:#a3e635;--sel:#1b2413;--lime:#a3e635;
+@media (prefers-color-scheme:dark){:root{--bg:#0e100e;--fg:#e9eee4;--muted:#8f998b;--line:#262b24;--card:#161a15;--accent:#a3e635;--sel:#2a2d29;--hi:#e6e8e3;--lime:#a3e635;
 --ent:#a3e635;--con:#ff6b6b;--neu:#7e857c;--unj:#fbbf24;--ent-bg:#1e2c10;--con-bg:#3a1c1c;--neu-bg:#232622;--unj-bg:#3a2d0f}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
@@ -31,7 +31,7 @@ p.txt{margin:0 0 4px;white-space:pre-wrap}
 .dots>b{position:absolute;top:2px;height:10px;border-top:1px solid var(--muted);border-bottom:1px solid var(--muted);opacity:.4}
 .dots>i{position:absolute;top:3px;width:8px;height:8px;margin-left:-4px;border-radius:50%;background:var(--accent);opacity:.75}
 .dots>s{position:absolute;top:1px;width:2px;height:12px;margin-left:-1px;background:var(--fg)}
-.expl{margin:4px 0 6px;padding:6px 10px;border-left:3px solid var(--accent);background:var(--card);font-size:13px}
+.expl{margin:4px 0 6px;padding:6px 10px;border-left:3px solid var(--hi);background:var(--card);font-size:13px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
 table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -39,7 +39,7 @@ th{font-weight:600;font-size:12px;color:var(--muted)}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg>button{background:transparent;color:var(--fg);border:0;padding:4px 10px;cursor:pointer;font:inherit}
-.seg>button.on{background:var(--accent);color:#fff}
+.seg>button.on{background:var(--fg);color:var(--bg)}
 select,button.btn{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer}
 .claim{padding:6px 0;border-bottom:1px dashed var(--line)}
 .claim .ctext{margin-bottom:3px}
@@ -61,10 +61,12 @@ header .sp{flex:1}
 :root{--gt:#8b5cf6;--pred:#1e5f8a}
 @media (prefers-color-scheme:dark){:root{--gt:#b794f6;--pred:#4a9de0}}
 /* ── run screen ────────────────────────────────────────────────────── */
-.mlead{font-size:12px;color:var(--muted);margin-bottom:10px}
-.cluster{margin-bottom:16px}
-.cluster h2{font-size:12.5px;margin:0 0 6px}
-.cluster h2 span{font-weight:400;color:var(--muted)}
+details.mb{margin-bottom:12px}
+details.mb>summary{font-size:12.5px;font-weight:600;cursor:pointer;padding:6px 0;color:var(--fg)}
+details.cl{margin:0 0 12px}
+details.cl>summary{font-size:12.5px;font-weight:600;cursor:pointer;margin:0 0 6px}
+details.cl>summary span{font-weight:400;color:var(--muted)}
+details.mb>div.band{margin-bottom:12px}
 .band{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
 .cell{flex:0 0 158px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .cell .k{font-size:11.5px;color:var(--muted)}
@@ -81,7 +83,7 @@ header .sp{flex:1}
 .items h2{display:flex;align-items:baseline;gap:8px}
 .items h2 .hd{text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 .row{display:grid;grid-template-columns:2.4em 1fr auto auto;gap:12px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:6px;cursor:pointer}
-.row:hover{border-color:var(--accent)}
+.row:hover{border-color:var(--hi)}
 .row .q{font-size:13.5px}
 .row .dots2{display:flex;gap:4px;align-items:center;flex-wrap:wrap;max-width:300px}
 .row .dots2 i{width:11px;height:11px;border-radius:50%;background:var(--neu);display:inline-block}

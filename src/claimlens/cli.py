@@ -19,7 +19,7 @@ import typer
 
 from claimlens import settings
 from claimlens.exceptions import ClaimLensError
-from claimlens.viewer import render_html
+from claimlens.viewer import write_html
 
 logger = settings.get_logger(__name__)
 
@@ -426,8 +426,7 @@ def ragcheck(
     logger.info("Written: %s", output_file)
     logger.info("Written: %s", findings_file)
     if html:
-        html_file = output_file.with_suffix(".html")
-        html_file.write_text(render_html(record, findings), encoding="utf-8")
+        html_file = write_html(record, findings, output_file.with_suffix(".html"))
         logger.info("Written: %s", html_file)
         logger.info("Open:    %s", html_file.resolve().as_uri())
 
@@ -500,8 +499,7 @@ def faithcheck(
     logger.info("Written: %s", output_file)
     logger.info("Written: %s", findings_file)
     if html:
-        html_file = output_file.with_suffix(".html")
-        html_file.write_text(render_html(record, findings), encoding="utf-8")
+        html_file = write_html(record, findings, output_file.with_suffix(".html"))
         logger.info("Written: %s", html_file)
         logger.info("Open:    %s", html_file.resolve().as_uri())
 

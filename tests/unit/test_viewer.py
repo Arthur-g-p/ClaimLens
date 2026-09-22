@@ -18,7 +18,7 @@ import claimlens
 from claimlens.cli import app
 from claimlens.exceptions import ViewerError
 from claimlens.utils import REPORT_SCHEMA_VERSION, build_meta
-from claimlens.viewer import TEMPLATES, render_html, supported_report_types
+from claimlens.viewer import TEMPLATES, render_html, supported_report_types, write_html
 
 TYPES = ["faithcheck", "ragcheck"]
 PIPELINES = {
@@ -117,9 +117,19 @@ class TestRender:
 
 class TestFacade:
 
-    def test_render_html_is_public(self):
-        assert "render_html" in claimlens.__all__
+    def test_render_and_write_are_public(self):
+        assert {"render_html", "write_html"} <= set(claimlens.__all__)
         assert claimlens.render_html is render_html
+        assert claimlens.write_html is write_html
+
+    @pytest.mark.parametrize("report_type", TYPES)
+    def test_write_html_picks_the_type_from_the_record(self, report_type, tmp_path):
+        record, findings = _documents(report_type)
+        out = write_html(record, findings, tmp_path / "report.html")
+        assert out == tmp_path / "report.html"
+        page = out.read_text(encoding="utf-8")
+        assert f"claimlens · {report_type}" in page
+        assert json.loads(_embedded(page, "record")) == record
 
 
 class _FakePipeline:

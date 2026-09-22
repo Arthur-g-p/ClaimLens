@@ -221,7 +221,8 @@ items = claimlens.extract(items, extractor_model="gpt-4o-mini")
 `ragcheck`, `faithcheck` and `refcheck` return the record and the findings,
 the two documents the CLI writes. `claimlens.render_html(record, findings)`
 returns the viewer page for a `ragcheck` or `faithcheck` record as a string, the same page
-the CLI writes as `{report_stem}.html`. `extract` and `check` return the enriched
+the CLI writes as `{report_stem}.html`; `claimlens.write_html(record, findings, "report.html")`
+writes it and returns the path. Both read the report type from the record. `extract` and `check` return the enriched
 item list. Extra keyword arguments go to the pipeline (`concurrency`,
 `joint`, `extractor_base_url`, `runs`, ...). Output is silent until you ask
 for it: `claimlens.enable_logging()` turns the console output on, and

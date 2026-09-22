@@ -88,23 +88,33 @@ function supportNote(run, k){
   const s = support(run, k), n = run._meta.evaluated_items;
   return (s == null || s === n) ? "" : s + " of " + n + " items";
 }
-function metricCell(k, run){
-  const m = R.metrics[k], vr = R.variance[k];
+// A cell is skipped when the source has no such key at all (not computed at
+// that level); null is n/a and still shown. vr adds ± std and the run dots;
+// run adds the support note from its counts.
+function metricCell(k, vals, vr, run){
+  const m = vals[k]; if(m === undefined) return "";
+  const v = vr && vr[k];
   return '<div class="cell" title="' + esc(DIR[k] || "") + '"><div class="k"><span class="mono">' + k + "</span> " + arrow(k) + "</div>"
-    + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(3)) + (NRUNS > 1 && vr && vr.std != null ? "<small>± " + vr.std.toFixed(3) + "</small>" : "") + "</div>"
+    + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(3)) + (v && v.std != null ? "<small>± " + v.std.toFixed(3) + "</small>" : "") + "</div>"
     + (m == null ? "" : '<div class="bar"><i class="' + (LOWER(k) ? "bad" : FLAT(k) ? "flat" : "") + '" style="width:' + (m * 100) + '%"></i></div>')
-    + (NRUNS > 1 ? dotsHtml(vr, m) : "")
-    + '<div class="n">' + supportNote(run, k) + "</div></div>";
+    + (v ? dotsHtml(v, m) : "")
+    + '<div class="n">' + (run ? supportNote(run, k) : "") + "</div></div>";
 }
-function metricBand(run){
+function cluster(name, desc, keys, vals, vr, run){
+  const cells = keys.map(k => metricCell(k, vals, vr, run)).join("");
+  if(!cells) return "";
+  if(!name) return '<div class="band">' + cells + "</div>";
+  return '<details class="cl" open><summary>' + esc(name) + (desc ? " <span>— " + esc(desc) + "</span>" : "") + '</summary><div class="band">' + cells + "</div></details>";
+}
+// One structure for every level: vals is a metrics dict (the mean over runs,
+// one run, or one item), vr its variance when it is a mean, run the run whose
+// counts annotate the cells. Clusters collapse on their own.
+function metricsBlock(title, vals, vr, run, open){
   let h = "";
-  for(const [name, desc, keys] of ROSTER.groups)
-    h += '<div class="cluster">' + (name ? "<h2>" + esc(name) + (desc ? " <span>— " + esc(desc) + "</span>" : "") + "</h2>" : "") + '<div class="band">' + keys.map(k => metricCell(k, run)).join("") + "</div></div>";
-  if(ROSTER.behavior && ROSTER.behavior.length)
-    h += '<div class="cluster"><h2>Abstention Behavior</h2><div class="band">' + ROSTER.behavior.map(k => metricCell(k, run)).join("") + "</div></div>";
-  if(ROSTER.health && ROSTER.health.length)
-    h += '<div class="cluster"><h2>Reliability <span>— tooling, excluded from all metrics</span></h2><div class="band">' + ROSTER.health.map(k => metricCell(k, run)).join("") + "</div></div>";
-  return h;
+  for(const [name, desc, keys] of ROSTER.groups) h += cluster(name, desc, keys, vals, vr, run);
+  if(ROSTER.behavior && ROSTER.behavior.length) h += cluster("Abstention Behavior", null, ROSTER.behavior, vals, vr, run);
+  if(ROSTER.health && ROSTER.health.length) h += cluster("Reliability", "tooling, excluded from all metrics", ROSTER.health, vals, vr, run);
+  return h ? '<details class="mb"' + (open ? " open" : "") + '><summary>' + esc(title) + "</summary>" + h + "</details>" : "";
 }
 function itemRows(items, cfg){
   let h = "";
@@ -114,11 +124,14 @@ function itemRows(items, cfg){
     h += '<div class="row" data-i="' + i + '"><span class="muted">#' + (i + 1) + '</span><span class="q">' + esc(it.query) + '</span><span class="dots2">' + dots + '</span><span class="f">' + cfg.right(it) + "</span></div>"; });
   return h;
 }
-// cfg: {dot(item, i) -> verdict class, right(item) -> html, dotLegend, abstainTitle, onOpen(i)}
 function runScreen(el, run, cfg){
-  const n = run._meta.evaluated_items, runNo = R.runs.indexOf(run) + 1;
-  el.innerHTML = '<div class="mlead">Metrics · ' + (NRUNS > 1 ? "mean over " + NRUNS + " runs · support and counts from run " + runNo : "macro over " + n + " items") + "</div>" + metricBand(run)
-    + '<div class="items"><h2><span class="hd">Items</span><span>· one dot per response claim · ' + esc(cfg.dotLegend || "") + "</span></h2>" + itemRows(run.items, cfg) + "</div>";
+  const runIdx = R.runs.indexOf(run);
+  let h = NRUNS > 1
+    ? metricsBlock("Metrics · mean ± std over " + NRUNS + " runs", R.metrics, R.variance, null, true)
+      + R.runs.map((r, i) => metricsBlock("Run " + (i + 1) + (r._meta && r._meta.duration_seconds != null ? " · " + r._meta.duration_seconds + "s" : ""), r.metrics || {}, null, r, false)).join("")
+    : metricsBlock("Metrics · macro over " + run._meta.evaluated_items + " items", run.metrics || {}, null, run, true);
+  h += '<div class="items"><h2><span class="hd">Items</span><span>· ' + (NRUNS > 1 ? "run " + (runIdx + 1) + " · " : "") + "one dot per response claim · " + esc(cfg.dotLegend || "") + "</span></h2>" + itemRows(run.items, cfg) + "</div>";
+  el.innerHTML = h;
   el.onclick = e => { const r = e.target.closest(".row"); if(r) cfg.onOpen(+r.dataset.i); };
 }
 function runSeg(el, runIdx){ el.innerHTML = NRUNS > 1 ? R.runs.map((_, i) => '<button class="' + (i === runIdx ? "on" : "") + '" data-r="' + i + '">Run ' + (i + 1) + "</button>").join("") : ""; }

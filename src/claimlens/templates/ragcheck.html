@@ -19,8 +19,8 @@
 .node.open .ex{display:block;-webkit-line-clamp:unset}
 .node .pills{display:block;margin-top:5px}
 #cols.focus .node:not(.hi){opacity:.28}
-.node.hi{box-shadow:0 0 0 2px var(--accent)}
-.node.chunk.rel.hi{box-shadow:0 0 0 2px var(--accent),0 0 0 1px var(--ent) inset}
+.node.hi{box-shadow:0 0 0 2px var(--hi)}
+.node.chunk.rel.hi{box-shadow:0 0 0 2px var(--hi),0 0 0 1px var(--ent) inset}
 #cg h3{color:var(--gt)}#cp h3{color:var(--pred)}
 #cg .src{border:1.5px solid var(--gt)}#cp .src{border:1.5px solid var(--pred)}
 #cg .node{border-top-color:var(--gt);border-right-color:var(--gt);border-bottom-color:var(--gt)}
@@ -124,7 +124,7 @@ svg#edges path.neu{stroke:var(--neu);stroke-width:1.5;stroke-dasharray:5 5;opaci
   function renderItem(){
     const it = items()[sel], m = it.metrics || {}, tags = findingTags(runIdx);
     let h = '<div class="itemhead">' + navHtml() + '<h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
-    h += '<div class="im">this item' + (NRUNS > 1 ? ', run ' + (runIdx + 1) : '') + ' · precision <b>' + fmt(m.precision) + '</b> · recall <b>' + fmt(m.recall) + '</b> · f1 <b>' + fmt(m.f1) + '</b> · faithfulness <b>' + fmt(m.faithfulness) + '</b> · hallucination <b>' + fmt(m.hallucination) + '</b></div>';
+    h += metricsBlock("Item metrics" + (NRUNS > 1 ? " · run " + (runIdx + 1) : ""), m, null, null, false);
     h += '<div class="legend"><span><i style="border-color:var(--ent)"></i>Entailment</span><span><i style="border-color:var(--con)"></i>Contradiction</span><span><i style="border-color:var(--neu);border-top-style:dashed;border-top-width:2px"></i>Neutral, on hover</span><span><i style="border-color:var(--unj);border-top-style:dotted"></i>unjudged</span></div>';
     let g = '<h3>GT answer <span class="n">' + it.gt_answer_claims.length + ' claims</span></h3><div class="src">' + (it.gt_answer ? esc(it.gt_answer) : "<i>(empty — unanswerable)</i>") + "</div>";
     it.gt_answer_claims.forEach((c, i) => { g += claimNode("g" + i, V(it.response2answer[i]), ct(c), tags, it); });

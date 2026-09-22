@@ -13,7 +13,7 @@ h2.sec .seg{margin-left:auto}
 h2.sec .seg button{font-size:12px;padding:3px 9px}
 .claim{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--neu);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:box-shadow .12s}
 .claim.ent{border-left-color:var(--ent)}.claim.con{border-left-color:var(--con)}.claim.unj{border-left-color:var(--unj)}
-.claim.on{box-shadow:0 0 0 2px var(--accent)}
+.claim.on{box-shadow:0 0 0 2px var(--hi)}
 .claim .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .claim .txt{font-size:14px;flex:1;min-width:200px}
 .cstrip{display:grid;grid-template-columns:repeat(var(--gridcols),14px);gap:3px;margin-top:8px}
@@ -44,7 +44,7 @@ h2.sec .seg button{font-size:12px;padding:3px 9px}
 .chunk .cid{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .chunk .text{margin-top:4px;color:var(--fg);cursor:pointer}
 .chunk .text.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.chunk .why{margin-top:6px;padding:6px 10px;border-left:3px solid var(--accent);background:var(--bg);font-size:12.5px}
+.chunk .why{margin-top:6px;padding:6px 10px;border-left:3px solid var(--hi);background:var(--bg);font-size:12.5px}
 .chunk .why .pill{margin-right:6px}
 </style></head><body>
 <script type="application/json" id="record">__RECORD__</script>
@@ -162,12 +162,12 @@ h2.sec .seg button{font-size:12px;padding:3px 9px}
   function renderItem(){
     const it = items()[sel], m = it.metrics || {}, sm = statusMap(runIdx), ctx = it.retrieved_context || [], nctx = ctx.length, M = it.retrieved2response || [], t = chunkTallies(it);
     let h = '<div class="itemhead">' + navHtml() + '<h2>#' + (sel + 1) + ' ' + esc(it.query) + '</h2></div>';
-    h += '<div class="im">this item' + (NRUNS > 1 ? ', run ' + (runIdx + 1) : '') + ' · faithfulness <b>' + fmt(m.faithfulness) + '</b> · ' + it.response_claims.length + ' claims · ' + nctx + ' chunks</div>';
+    h += metricsBlock("Item metrics" + (NRUNS > 1 ? " · run " + (runIdx + 1) : ""), m, null, null, false);
     h += '<div class="resp">' + (it.response ? esc(it.response) : '<span class="na">(empty response' + (it.is_abstention ? ' — abstained' : '') + ')</span>') + '</div>';
-    h += '<h2 class="sec">Claims <span>· click a claim for every verdict · click a square to open that chunk</span></h2>';
+    h += '<h2 class="sec">' + it.response_claims.length + ' claims <span>· click a claim for every verdict · click a square to open that chunk</span></h2>';
     h += it.response_claims.length ? it.response_claims.map((_, i) => claimHtml(it, i, sm)).join("") : '<div class="na">no claims' + (it.is_abstention ? ' — the response abstained' : '') + '</div>';
     const pc = picked != null ? (M[picked] || []) : null;
-    h += '<h2 class="sec">Retrieved chunks <span>· ' + nctx + ' · ' + (pc ? 'colored for claim ' + (picked + 1) : t.grounds.filter(g => g > 0).length + ' ground a claim · ' + t.contradicts.filter(c => c > 0).length + ' contradict one') + '</span><span class="seg" id="view"><button class="' + (view === "grid" ? "on" : "") + '" data-v="grid">grid</button><button class="' + (view === "list" ? "on" : "") + '" data-v="list">list</button></span></h2>';
+    h += '<h2 class="sec">' + nctx + ' retrieved chunks <span>· ' + (pc ? 'colored for claim ' + (picked + 1) : t.grounds.filter(g => g > 0).length + ' ground a claim · ' + t.contradicts.filter(c => c > 0).length + ' contradict one') + '</span><span class="seg" id="view"><button class="' + (view === "grid" ? "on" : "") + '" data-v="grid">grid</button><button class="' + (view === "list" ? "on" : "") + '" data-v="list">list</button></span></h2>';
     if(view === "grid"){
       h += '<div class="cgrid">' + ctx.map((c, j) => { const cls = pc ? vcls(V(pc[j]).verdict) : (t.grounds[j] && t.contradicts[j] ? "both" : t.grounds[j] ? "ent" : t.contradicts[j] ? "con" : "");
         return '<div class="cell2 ' + cls + (openChunk === j ? " on" : "") + '" data-c="' + j + '" title="' + esc(shortChunk(j) + " · " + (c.doc_id || "") + (pc ? " · " + vname(V(pc[j]).verdict) : (t.grounds[j] ? " · grounds " + t.grounds[j] : "") + (t.contradicts[j] ? " · contradicts " + t.contradicts[j] : ""))) + '"><span class="id">' + shortChunk(j) + '</span><span class="dt">' + esc(c.doc_id || "") + '</span></div>'; }).join("") + '</div>';

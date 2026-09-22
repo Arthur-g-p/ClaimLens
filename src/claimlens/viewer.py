@@ -51,6 +51,15 @@ def render_html(record: dict, findings: dict | None = None) -> str:
     return page.replace("__RECORD__", _embed(record)).replace("__FINDINGS__", _embed(findings or {}))
 
 
+def write_html(record: dict, findings: dict | None, path: str | Path) -> Path:
+    """Render *record* (and *findings*) and write the page to *path*, UTF-8.
+    The report type is read from the record, so one call serves every viewable
+    type. Returns the path written."""
+    out = Path(path)
+    out.write_text(render_html(record, findings), encoding="utf-8")
+    return out
+
+
 def _embed(document: dict) -> str:
     # A "<" inside any string could close the script tag; as < it is still the same JSON.
     return json.dumps(document, ensure_ascii=False).replace("<", "\\u003c")

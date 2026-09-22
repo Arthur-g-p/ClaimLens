@@ -16,6 +16,7 @@ same keyword names as its flags:
     entry = await claimlens.acheck_faithfulness(response, chunks, extractor_model=..., checker_model=...)
 
     page = claimlens.render_html(record, findings)   # the viewer the CLI writes as {stem}.html
+    path = claimlens.write_html(record, findings, "report.html")   # same page, written UTF-8
 
     claimlens.enable_logging()      # output is silent until asked for
     claimlens.__version__
@@ -40,7 +41,7 @@ from typing import NamedTuple
 
 from claimlens.settings import enable_logging
 from claimlens.utils import _package_version
-from claimlens.viewer import render_html
+from claimlens.viewer import render_html, write_html
 
 __version__ = _package_version()
 
@@ -162,6 +163,6 @@ async def acheck_faithfulness(*args, **kwargs) -> dict:
 
 __all__ = [
     "ragcheck", "faithcheck", "refcheck", "extract", "check",
-    "check_faithfulness", "acheck_faithfulness", "render_html",
+    "check_faithfulness", "acheck_faithfulness", "render_html", "write_html",
     "enable_logging", "__version__", "Report",
 ]
