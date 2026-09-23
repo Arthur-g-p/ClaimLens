@@ -21,7 +21,7 @@ The original is reconstructible from the RefChecker repository.
 
 ## What was changed, and what was not
 
-> **Five human labels were changed** — listed at the end of this file. Every
+> **Twelve human labels were changed** — listed at the end of this file. Every
 > other verdict is exactly as the RefChecker annotators left it.
 
 The extractions around those labels were repaired. The annotation task judged
@@ -120,3 +120,15 @@ The evaluation procedure is described in full in the evaluation article.
 | `537560` | Scarsdale, New York → zip code → 10583 | Neutral | Entailment | stated outright in a postal address, "Scarsdale, New York 10583" |
 | `63192` | school psychologist → can diagnose → ADHD | Entailment | Neutral | the passages name who may diagnose, and school psychologists are not among them |
 | `1097044` | CRS Designation → earned by completing → 92 hours of live course instruction | Entailment | Neutral | the 92 hours belongs to the Graduate, Realtor Institute entry that begins mid-passage; CRS is awarded by a different body, and no passage gives its hours |
+| `810239` | dogs urinating all the time → caused by → diabetes | Neutral | Entailment | "frequent urination [is a sign] of four serious canine medical problems: diabetes, kidney problems, liver disease and Cushings Disease" |
+| `810239` | dogs urinating all the time → caused by → kidney problems | Neutral | Entailment | same passage as diabetes |
+| `810239` | dogs urinating all the time → caused by → liver disease | Neutral | Entailment | same passage as diabetes |
+| `810239` | dogs urinating all the time → caused by → Cushings Disease | Neutral | Entailment | same passage as diabetes |
+| `810239` | dogs urinating all the time → caused by → urinary tract infections | Neutral | Entailment | "Causes of Urination Problems in Dogs" names UTI as a physical cause |
+| `810239` | dogs urinating all the time → caused by → interstitial cystitis | Entailment | Neutral | the passage lists it as a cause of frequent urination without saying it applies to dogs |
+| `810239` | dogs urinating all the time → caused by → damage to nerves that supply the bladder | Entailment | Neutral | the passage describes urges to urinate without saying it applies to dogs |
+
+The seven `810239` changes follow one rule: a cause counts only if a passage ties it to
+dogs. The original labels went the other way, rejecting the four diseases that
+a passage names as canine and accepting two causes from passages that never
+mention dogs.
