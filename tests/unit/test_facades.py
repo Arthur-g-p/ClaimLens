@@ -52,7 +52,7 @@ class TestSurface:
 
     def test_public_names(self):
         assert set(claimlens.__all__) >= {
-            "ragcheck", "faithcheck", "refcheck", "extract", "check",
+            "ragcheck", "faithcheck", "refcheck", "compare", "acompare", "extract", "check",
             "check_faithfulness", "acheck_faithfulness", "enable_logging", "__version__"}
 
     def test_version_matches_installed_metadata(self):
@@ -91,6 +91,30 @@ class TestBatchVerbs:
         assert record["_args"]["command"] == verb
         assert _FakePipeline.instances[0].kwargs == {"extractor_model": "e", "checker_model": "c"}
 
+    def test_compare_one_pair_of_texts(self, monkeypatch):
+        monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
+        record, findings = claimlens.compare("full text", "summary", extractor_model="e",
+                                             checker_model="c", hierarchy="a")
+        p = _FakePipeline.instances[0]
+        assert p.ran == [{"a": "full text", "b": "summary"}]
+        assert p.kwargs == {"extractor_model": "e", "checker_model": "c", "hierarchy": "a"}
+        assert record["_args"]["command"] == "compare"
+        assert record["_args"]["hierarchy"] == "a"
+        assert findings["_args"] == record["_args"]
+
+    def test_compare_many_items(self, monkeypatch):
+        monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
+        items = [{"a": "x", "b": "y"}, {"a": "z", "b": "w"}]
+        claimlens.compare(items, extractor_model="e", checker_model="c")
+        assert _FakePipeline.instances[0].ran is items
+
+    @pytest.mark.parametrize("args", [("text",), (["items"], "b"), ("a", ["b"])])
+    def test_compare_refuses_ambiguous_input(self, monkeypatch, args):
+        monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
+        with pytest.raises(TypeError, match=r"compare\(a, b\)"):
+            claimlens.compare(*args, extractor_model="e", checker_model="c")
+        assert _FakePipeline.instances == []
+
     def test_extract_maps_uniform_names_onto_the_service(self, monkeypatch):
         monkeypatch.setattr("claimlens.services.extraction.ExtractionService", _FakeService)
         out = claimlens.extract(ITEMS, extractor_model="e", extractor_base_url="http://x", dedup=False)
@@ -124,6 +148,26 @@ class TestEventLoop:
                 claimlens.check_faithfulness("resp", ["chunk"], extractor_model="e", checker_model="c")
 
         asyncio.run(inside())
+
+    def test_compare_points_at_acompare(self, monkeypatch):
+        monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
+
+        async def inside():
+            with pytest.raises(RuntimeError, match="acompare"):
+                claimlens.compare("a", "b", extractor_model="e", checker_model="c")
+
+        asyncio.run(inside())
+        assert _FakePipeline.instances == []
+
+    def test_acompare_works_inside_a_loop(self, monkeypatch):
+        monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
+
+        async def inside():
+            return await claimlens.acompare("a", "b", extractor_model="e", checker_model="c")
+
+        record, findings = asyncio.run(inside())
+        assert record["_args"]["command"] == "compare"
+        assert _FakePipeline.instances[0].ran == [{"a": "a", "b": "b"}]
 
     def test_async_twin_works_inside_a_loop(self, monkeypatch):
         monkeypatch.setattr("claimlens.pipelines.faithfulness.FaithfulnessPipeline", _FakePipeline)

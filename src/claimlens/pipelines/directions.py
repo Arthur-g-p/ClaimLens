@@ -83,6 +83,51 @@ def abstention_counts(entries: list[dict]) -> dict:
     }
 
 
+# ── Report primitives (shared by the pipelines' records) ─────────────────────
+
+_ENTAILMENT = "Entailment"
+_CONTRADICTION = "Contradiction"
+
+
+def _ratio(numerator: float, denominator: int) -> float | None:
+    """Zero denominators are null, not 0.0 - 'not computable' is not a score."""
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 4)
+
+
+def _row_entailed(row: list[dict]) -> bool | None:
+    """Three-valued 'entailed by any chunk' over a matrix row."""
+    verdicts = [cell.get("verdict") for cell in row]
+    if _ENTAILMENT in verdicts:
+        return True
+    if None in verdicts:
+        return None
+    return False
+
+
+def _spo(triplet: dict) -> dict:
+    """Claims in the report are clean s/p/o - verdicts live in the arrays."""
+    return {
+        "subject": triplet.get("subject"),
+        "predicate": triplet.get("predicate"),
+        "object": triplet.get("object"),
+    }
+
+
+def _flat_cell(triplet: dict, namespace: str) -> dict:
+    """A null verdict is never opaque in the report: the check-failure
+    cause rides along, sparsely."""
+    cell = {
+        "verdict": triplet.get(f"{namespace}_verdict"),
+        "explanation": triplet.get(f"{namespace}_explanation"),
+    }
+    error = triplet.get(f"{namespace}_error")
+    if error:
+        cell["error"] = error
+    return cell
+
+
 def _location(service) -> str:
     """``model @ base_url`` for Config blocks — the same string the bare
     services print for themselves."""

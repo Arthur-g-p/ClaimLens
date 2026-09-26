@@ -20,10 +20,14 @@ from claimlens.exceptions import ViewerError
 from claimlens.utils import REPORT_SCHEMA_VERSION, build_meta
 from claimlens.viewer import TEMPLATES, render_html, supported_report_types, write_html
 
-TYPES = ["faithcheck", "ragcheck"]
+TYPES = ["compare", "faithcheck", "ragcheck"]
+# Rosters fixed per pipeline class; compare's groups, directions and labels
+# follow each run's hierarchy, so it has its own parity test per hierarchy.
+STATIC_ROSTER_TYPES = ["faithcheck", "ragcheck"]
 PIPELINES = {
     "ragcheck": ("claimlens.pipelines.ragchecker", "RagCheckerPipeline"),
     "faithcheck": ("claimlens.pipelines.faithfulness", "FaithfulnessPipeline"),
+    "compare": ("claimlens.pipelines.compare", "ComparePipeline"),
 }
 
 
@@ -194,7 +198,7 @@ class TestRosterParity:
         assert m, f"{report_type}.html has no roster island"
         return json.loads(m.group(1))
 
-    @pytest.mark.parametrize("report_type", TYPES)
+    @pytest.mark.parametrize("report_type", STATIC_ROSTER_TYPES)
     def test_groups_behavior_health_and_directions_match_the_pipeline(self, report_type):
         P = _pipeline(report_type)
         roster = self._roster(report_type)
@@ -202,6 +206,24 @@ class TestRosterParity:
         assert roster["behavior"] == list(P._VARIANCE_SECTIONS["behavior"])
         assert roster["health"] == list(P._VARIANCE_SECTIONS["health"])
         assert roster["directions"] == P._METRIC_DIRECTIONS
+
+    @pytest.mark.parametrize("hierarchy", [None, "a", "b"])
+    def test_compare_roster_under_each_hierarchy_matches_the_pipeline(self, hierarchy):
+        from unittest.mock import patch
+        from claimlens.pipelines.compare import ComparePipeline
+        with patch("claimlens.services.extraction.Extractor"), \
+             patch("claimlens.services.checking.Checker"):
+            p = ComparePipeline(extractor_model="e", checker_model="c", hierarchy=hierarchy)
+        roster = self._roster("compare")
+        suffix = roster["ground_truth_suffix"]
+        groups = [(name + (suffix if hierarchy and name == hierarchy.upper() else ""), keys)
+                  for name, _, keys in roster["groups"]]
+        assert groups == [(n, list(k)) for n, k in p._VARIANCE_SECTIONS["metrics"]]
+        assert roster["behavior"] == p._VARIANCE_SECTIONS["behavior"]
+        assert roster["health"] == p._VARIANCE_SECTIONS["health"]
+        directions = {**roster["directions"], **(roster["hierarchy_directions"] if hierarchy else {})}
+        assert directions == p._METRIC_DIRECTIONS
+        assert roster["hierarchy_labels"][hierarchy or "none"] == p._VARIANCE_LABELS
 
     @pytest.mark.parametrize("report_type", TYPES)
     def test_universes_name_real_abstention_counts(self, report_type):

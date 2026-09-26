@@ -12,6 +12,7 @@ from claimlens.pipelines.faithfulness import (
     FaithfulnessPipeline,
     check_faithfulness,
 )
+from claimlens.stats import PhaseStats
 
 
 FAKE_API_KEY = "test-key-12345"
@@ -153,6 +154,21 @@ class TestBuildRun:
         assert entry["is_abstention"] is True
         assert entry["metrics"]["faithfulness"] is None
 
+    def test_empty_response_is_counted_as_an_abstention(self, pipeline):
+        """docs/faithfulness.md: an empty response string is data, a full
+        abstention, not a missing field. _validate keeps it, so the report
+        must count it as abstained rather than drop it."""
+        item = _full_item(response="", **{RESPONSE_KG: [], "is_abstention": True,
+                                          "abstention_source": "heuristic"})
+        run = pipeline._build_run([item])
+        assert (run["_meta"]["evaluated_items"], run["_meta"]["dropped_items"]) == (1, 0)
+        assert run["counts"]["abstention"] == {"evaluated": 1, "errored": 0,
+                                               "abstained": 1, "answered": 0}
+        assert run["metrics"]["abstention_rate"] == 1.0
+        entry = run["items"][0]
+        assert entry["is_abstention"] is True
+        assert entry["metrics"]["faithfulness"] is None
+
     def test_extraction_error_is_null(self, pipeline):
         item = _full_item(**{
             RESPONSE_KG: [],
@@ -225,3 +241,23 @@ class TestFacade:
         instance.run_sync.assert_called_once_with(
             [{"response": "some response", "retrieved_context": ["chunk"]}]
         )
+
+    def test_check_faithfulness_on_an_empty_response(self):
+        """The real-time path when the model returned nothing: the real
+        pipeline runs, only the workers are stand-ins. The refusal pre-filter
+        catches "" before any request, so the extractor sees an empty batch
+        and the checker has no claim to judge."""
+        class NoCallExtractor:
+            def __init__(self, **kwargs):
+                self.last_stats = PhaseStats()
+
+            async def extract_batch(self, payloads, description=None):
+                return [[] for _ in payloads]
+
+        with patch("claimlens.services.extraction.Extractor", NoCallExtractor), \
+             patch("claimlens.services.checking.Checker"):
+            entry = check_faithfulness("", ["The Nile is the longest river."],
+                                       extractor_model=EXT, checker_model=CHK)
+
+        assert entry["is_abstention"] is True
+        assert entry["metrics"]["faithfulness"] is None

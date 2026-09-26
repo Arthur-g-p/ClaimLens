@@ -31,7 +31,12 @@ from claimlens.services.base import BaseService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.checking import CheckingService
 from claimlens.pipelines.directions import (
+    _ENTAILMENT,
+    _flat_cell,
     _location,
+    _ratio,
+    _row_entailed,
+    _spo,
     abstention_counts,
     log_pipeline_tree,
     pipeline_counts,
@@ -62,8 +67,6 @@ def _missing_keys(item: dict) -> list[str]:
         missing.append("retrieved_context")
     return missing
 
-_ENTAILMENT = "Entailment"
-
 # Paper metric names, in the original RAGChecker output order.
 METRIC_NAMES = (
     "precision", "recall", "claim_recall", "context_precision",
@@ -83,23 +86,6 @@ METRIC_NAMES = (
 # unknown claims leave numerator AND denominator so checker failures cannot
 # inflate hallucination. Known cells decide when they can: one Entailment in a
 # matrix row makes the claim entailed regardless of unknown cells.
-
-
-def _ratio(numerator: float, denominator: int) -> float | None:
-    """Zero denominators are null, not 0.0 - 'not computable' is not a score."""
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 4)
-
-
-def _row_entailed(row: list[dict]) -> bool | None:
-    """Three-valued 'entailed by any chunk' over a matrix row."""
-    verdicts = [cell.get("verdict") for cell in row]
-    if _ENTAILMENT in verdicts:
-        return True
-    if None in verdicts:
-        return None
-    return False
 
 
 def _chunk_relevance(ret2a: list[list[dict]], n_chunks: int) -> list[bool | None]:
@@ -795,10 +781,10 @@ class RagCheckerPipeline(BaseService):
             "is_abstention": bool(item.get("is_abstention", False)),
             "gt_no_answer": bool(item.get("gt_no_answer", False)),
             "retrieved_context": chunks,
-            "response_claims": [self._spo(t) for t in response_claims],
-            "gt_answer_claims": [self._spo(t) for t in gt_claims],
-            "answer2response": [self._flat_cell(t, a2r) for t in response_claims],
-            "response2answer": [self._flat_cell(t, r2a) for t in gt_claims],
+            "response_claims": [_spo(t) for t in response_claims],
+            "gt_answer_claims": [_spo(t) for t in gt_claims],
+            "answer2response": [_flat_cell(t, a2r) for t in response_claims],
+            "response2answer": [_flat_cell(t, r2a) for t in gt_claims],
             "retrieved2response": [
                 self._matrix_row(t, ret2r, len(chunks)) for t in response_claims
             ],
@@ -827,28 +813,6 @@ class RagCheckerPipeline(BaseService):
         # Metrics last - gating reads is_abstention and extraction_errors.
         entry["metrics"] = compute_item_metrics(entry)
         return entry
-
-    @staticmethod
-    def _spo(triplet: dict) -> dict:
-        """Claims in the report are clean s/p/o - verdicts live in the arrays."""
-        return {
-            "subject": triplet.get("subject"),
-            "predicate": triplet.get("predicate"),
-            "object": triplet.get("object"),
-        }
-
-    @staticmethod
-    def _flat_cell(triplet: dict, namespace: str) -> dict:
-        """A null verdict is never opaque in the report: the check-failure
-        cause rides along, sparsely."""
-        cell = {
-            "verdict": triplet.get(f"{namespace}_verdict"),
-            "explanation": triplet.get(f"{namespace}_explanation"),
-        }
-        error = triplet.get(f"{namespace}_error")
-        if error:
-            cell["error"] = error
-        return cell
 
     @staticmethod
     def _matrix_row(triplet: dict, namespace: str, n_chunks: int) -> list[dict]:

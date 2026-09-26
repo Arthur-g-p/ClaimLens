@@ -91,10 +91,12 @@ function supportNote(run, k){
 // A cell is skipped when the source has no such key at all (not computed at
 // that level); null is n/a and still shown. vr adds ± std and the run dots;
 // run adds the support note from its counts.
+// roster.labels (optional) puts a name before the key, for templates whose
+// metrics are named by the run (compare under a ground truth).
 function metricCell(k, vals, vr, run){
   const m = vals[k]; if(m === undefined) return "";
-  const v = vr && vr[k];
-  return '<div class="cell" title="' + esc(DIR[k] || "") + '"><div class="k"><span class="mono">' + k + "</span> " + arrow(k) + "</div>"
+  const v = vr && vr[k], lab = ROSTER.labels && ROSTER.labels[k];
+  return '<div class="cell" title="' + esc(DIR[k] || "") + '"><div class="k">' + (lab ? '<span class="nm">' + esc(lab) + "</span> · " : "") + '<span class="mono">' + k + "</span> " + arrow(k) + "</div>"
     + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(3)) + (v && v.std != null ? "<small>± " + v.std.toFixed(3) + "</small>" : "") + "</div>"
     + (m == null ? "" : '<div class="bar"><i class="' + (LOWER(k) ? "bad" : FLAT(k) ? "flat" : "") + '" style="width:' + (m * 100) + '%"></i></div>')
     + (v ? dotsHtml(v, m) : "")
@@ -124,12 +126,18 @@ function itemRows(items, cfg){
     h += '<div class="row" data-i="' + i + '"><span class="muted">#' + (i + 1) + '</span><span class="q">' + esc(it.query) + '</span><span class="dots2">' + dots + '</span><span class="f">' + cfg.right(it) + "</span></div>"; });
   return h;
 }
-function runScreen(el, run, cfg){
-  const runIdx = R.runs.indexOf(run);
-  let h = NRUNS > 1
+// Over N runs the final result comes first, mean ± std with one dot per run,
+// then each run's own block; one run shows its macro block. Every report's
+// run screen opens with it.
+function runMetrics(run){
+  return NRUNS > 1
     ? metricsBlock("Metrics · mean ± std over " + NRUNS + " runs", R.metrics, R.variance, null, true)
       + R.runs.map((r, i) => metricsBlock("Run " + (i + 1) + (r._meta && r._meta.duration_seconds != null ? " · " + r._meta.duration_seconds + "s" : ""), r.metrics || {}, null, r, false)).join("")
     : metricsBlock("Metrics · macro over " + run._meta.evaluated_items + " items", run.metrics || {}, null, run, true);
+}
+function runScreen(el, run, cfg){
+  const runIdx = R.runs.indexOf(run);
+  let h = runMetrics(run);
   h += '<div class="items"><h2><span class="hd">Items</span><span>· ' + (NRUNS > 1 ? "run " + (runIdx + 1) + " · " : "") + "one dot per response claim · " + esc(cfg.dotLegend || "") + "</span></h2>" + itemRows(run.items, cfg) + "</div>";
   el.innerHTML = h;
   el.onclick = e => { const r = e.target.closest(".row"); if(r) cfg.onOpen(+r.dataset.i); };

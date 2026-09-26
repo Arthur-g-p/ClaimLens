@@ -55,6 +55,7 @@ _ARGS_ORDER = (
     "atomizer_base_api",
     "gt_key",
     "source_kg_key",
+    "hierarchy",
     "joint",
     "joint_num",
     "max_words",
@@ -491,6 +492,81 @@ def faithcheck(
 
     # The record is the source; the findings file and the HTML page are views derived from it.
     _args = _capture_args(ctx, "faithcheck")
+    record = {"_args": _args, **report}
+    findings = {"_args": _args, **pipeline.last_findings}
+    findings_file = output_file.with_name(output_file.stem + "_findings.json")
+    output_file.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    findings_file.write_text(json.dumps(findings, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("Written: %s", output_file)
+    logger.info("Written: %s", findings_file)
+    if html:
+        html_file = write_html(record, findings, output_file.with_suffix(".html"))
+        logger.info("Written: %s", html_file)
+        logger.info("Open:    %s", html_file.resolve().as_uri())
+
+
+@app.command()
+def compare(
+    ctx: typer.Context,
+    input_file: Path = typer.Argument(..., help="Path to JSON input file (items with two texts, 'a' and 'b', and an optional 'id')."),
+    output_file: Path = typer.Option(None, "--output", "-o", help="Report path. Defaults to results/{input_stem}_compare[_{runs}].json. A *_findings.json sibling (the review queue) is written alongside."),
+    html: bool = typer.Option(True, "--html/--no-html", help="Also write {report_stem}.html, a self-contained viewer of the report. Default: on."),
+    extractor_model: str = typer.Option(..., "--extractor-model", "-e", help="Model for both extractions (a + b)."),
+    checker_model: str = typer.Option(..., "--checker-model", "-c", help="Model for both checking directions."),
+    extractor_base_api: str = typer.Option(None, "--extractor-base-api", help="Optional base URL for the extractor LLM API."),
+    checker_base_api: str = typer.Option(None, "--checker-base-api", help="Optional base URL for the checker LLM API."),
+    hierarchy: str = typer.Option(None, "--hierarchy", help="Which text is the ground truth: 'a' or 'b'. Unset: no hierarchy, a symmetric comparison. Changes the words (recall/precision), never the numbers."),
+    dedup: bool = typer.Option(True, "--dedup/--no-dedup", help="Remove exact (s,p,o) duplicate triplets. On by default."),
+    joint: bool = typer.Option(True, "--joint/--no-joint", help="Joint checking (multiple claims per call). Default: on."),
+    joint_num: int = typer.Option(settings.DEFAULT_JOINT_NUM, "--joint-num", help="Max claims per joint LLM call."),
+    max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
+    runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
+    concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
+):
+    """Compare two texts claim by claim, both ways: each text's claims checked against the other text."""
+    from claimlens.pipelines.compare import ComparePipeline
+
+    settings.enable_logging(debug=debug)
+
+    _print_header("compare")
+
+    output_file = _resolve_output(input_file, "compare", output_file, runs=runs)
+
+    # Load input
+    try:
+        data = json.loads(input_file.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.error("Input file not found: %s", input_file)
+        raise typer.Exit(code=1)
+    except json.JSONDecodeError as exc:
+        logger.error("Invalid JSON in %s: %s", input_file, exc)
+        raise typer.Exit(code=1)
+
+    # Call pipeline
+    try:
+        pipeline = ComparePipeline(
+            concurrency=concurrency,
+            extractor_model=extractor_model,
+            checker_model=checker_model,
+            hierarchy=hierarchy,
+            extractor_base_url=extractor_base_api,
+            checker_base_url=checker_base_api,
+            dedup=dedup,
+            joint=joint,
+            joint_num=joint_num,
+            max_words=max_words,
+            runs=runs,
+        )
+        pipeline.run_sync(data)
+        report = pipeline.last_report
+    except ClaimLensError as exc:
+        logger.error("")
+        logger.error("❌ %s: %s", type(exc).__name__, exc)
+        raise typer.Exit(code=1)
+
+    # The record is the source; the findings file and the HTML page are views derived from it.
+    _args = _capture_args(ctx, "compare")
     record = {"_args": _args, **report}
     findings = {"_args": _args, **pipeline.last_findings}
     findings_file = output_file.with_name(output_file.stem + "_findings.json")

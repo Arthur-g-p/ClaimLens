@@ -17,6 +17,7 @@ OPERATIONS = [
     "refcheck",
     "ragcheck",
     "faithcheck",
+    "compare",
     "checker_eval",
     "extractor_eval",
 ]

@@ -169,6 +169,34 @@
       }
     },
     {
+      "name": "06 · compare — kepler22b",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.venv/bin/claimlens",
+      "args": [
+        "compare",
+        "examples/compare/kepler22b.json",
+        "--extractor-model",
+        "${input:extractorModel}",
+        "--extractor-base-api",
+        "${input:extractorBaseApi}",
+        "--checker-model",
+        "${input:checkerModel}",
+        "--checker-base-api",
+        "${input:checkerBaseApi}",
+        "--runs",
+        "2"
+      ],
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "presentation": {
+        "group": "1 · Walkthrough",
+        "order": 6
+      }
+    },
+    {
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/.venv/bin/claimlens",

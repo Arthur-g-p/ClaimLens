@@ -2,18 +2,21 @@
 claimlens — Claim-level evaluation for LLM outputs: decompose text into
 atomic claims, then verify every claim against a reference.
 
-The public API, stable within 1.x. The same five verbs as the CLI, with the
+The public API, stable within 1.x. The same six verbs as the CLI, with the
 same keyword names as its flags:
 
     import claimlens
     record, findings = claimlens.ragcheck(items, extractor_model=..., checker_model=...)
     record, findings = claimlens.faithcheck(items, extractor_model=..., checker_model=...)
     record, findings = claimlens.refcheck(items, extractor_model=..., checker_model=...)
+    record, findings = claimlens.compare(a, b, extractor_model=..., checker_model=...)
+    record, findings = claimlens.compare(items, extractor_model=..., checker_model=...)
     items = claimlens.extract(items, extractor_model=...)
     items = claimlens.check(items, checker_model=..., extractor_model=...)
 
     entry = claimlens.check_faithfulness(response, chunks, extractor_model=..., checker_model=...)
     entry = await claimlens.acheck_faithfulness(response, chunks, extractor_model=..., checker_model=...)
+    record, findings = await claimlens.acompare(a, b, extractor_model=..., checker_model=...)
 
     page = claimlens.render_html(record, findings)   # the viewer the CLI writes as {stem}.html
     path = claimlens.write_html(record, findings, "report.html")   # same page, written UTF-8
@@ -121,6 +124,47 @@ def refcheck(items: list[dict], *, extractor_model: str, checker_model: str,
     return _report(pipeline, "refcheck", params)
 
 
+def _compare_items(a, b) -> list[dict]:
+    """``compare(a, b)`` is one pair of texts, ``compare(items)`` many."""
+    if b is None and isinstance(a, list):
+        return a
+    if isinstance(a, str) and isinstance(b, str):
+        return [{"a": a, "b": b}]
+    raise TypeError(
+        "compare takes two texts, compare(a, b), or one list of items with "
+        "'a' and 'b', compare(items)."
+    )
+
+
+def compare(a: str | list[dict], b: str | None = None, *, extractor_model: str,
+            checker_model: str, **kwargs) -> Report:
+    """Two texts, claim by claim, both ways: each text's claims are checked
+    against the other text. ``compare(a, b)`` for one pair, ``compare(items)``
+    for many (items need ``a`` and ``b``, and may carry an ``id``).
+    ``hierarchy="a"`` or ``"b"`` names the ground truth and changes only the
+    words. Extra keyword arguments go to ComparePipeline.
+    Returns (record, findings)."""
+    _no_running_loop("compare", "await claimlens.acompare(...)")
+    from claimlens.pipelines.compare import ComparePipeline
+    items = _compare_items(a, b)
+    params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
+    pipeline = ComparePipeline(**params)
+    pipeline.run_sync(items)
+    return _report(pipeline, "compare", params)
+
+
+async def acompare(a: str | list[dict], b: str | None = None, *, extractor_model: str,
+                   checker_model: str, **kwargs) -> Report:
+    """The async twin of ``compare``: same arguments, same return, for
+    callers already inside an event loop (a notebook cell, an async server)."""
+    from claimlens.pipelines.compare import ComparePipeline
+    items = _compare_items(a, b)
+    params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
+    pipeline = ComparePipeline(**params)
+    await pipeline.run(items)
+    return _report(pipeline, "compare", params)
+
+
 def extract(items: list[dict], *, extractor_model: str,
             extractor_base_url: str | None = None, **kwargs) -> list[dict]:
     """Decompose each item's ``response`` into atomic claims, written back
@@ -162,7 +206,7 @@ async def acheck_faithfulness(*args, **kwargs) -> dict:
 
 
 __all__ = [
-    "ragcheck", "faithcheck", "refcheck", "extract", "check",
+    "ragcheck", "faithcheck", "refcheck", "compare", "acompare", "extract", "check",
     "check_faithfulness", "acheck_faithfulness", "render_html", "write_html",
     "enable_logging", "__version__", "Report",
 ]

@@ -75,6 +75,7 @@ class TestMetaConformance:
         ("ragcheck", {}),
         ("faithcheck", {}),
         ("refcheck", {}),
+        ("compare", {}),
         ("checker_eval", {}),
         ("extractor_eval", {"pred_key": "m_response_kg", "matching": "llm-2-pass"}),
     ])

@@ -29,7 +29,11 @@ from claimlens.services.base import BaseService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.checking import CheckingService
 from claimlens.pipelines.directions import (
+    _CONTRADICTION,
+    _ENTAILMENT,
     _location,
+    _ratio,
+    _row_entailed,
     abstention_counts,
     log_pipeline_tree,
     pipeline_counts,
@@ -38,15 +42,25 @@ from claimlens.pipelines.directions import (
     run_direction,
     unwrap_items,
 )
-from claimlens.pipelines.ragchecker import _ENTAILMENT, _ratio, _row_entailed
-
-_CONTRADICTION = "Contradiction"
 from claimlens.stats import GLOBAL_STATS, format_headline, log_mece_tree, log_rate_rows, log_token_stats, usage_since
 from claimlens.utils import build_meta, findings_view, plural
 
 logger = settings.get_logger(__name__)
 
 REQUIRED_KEYS = ("response", "retrieved_context")
+
+
+def _missing_keys(item) -> list[str]:
+    """One check for validation and the report, so they cannot disagree.
+    Absent or null is missing; an empty response is data (a full
+    abstention); an empty chunk list is not — nothing can be checked
+    against no context."""
+    if not isinstance(item, dict):
+        return list(REQUIRED_KEYS)
+    missing = [] if isinstance(item.get("response"), str) else ["response"]
+    if not item.get("retrieved_context"):
+        missing.append("retrieved_context")
+    return missing
 
 
 class FaithfulnessPipeline(BaseService):
@@ -185,11 +199,7 @@ class FaithfulnessPipeline(BaseService):
                 logger.debug("Item %d is not an object (%s) - skipping.",
                              i, type(item).__name__)
                 continue
-            missing = []
-            if not isinstance(item.get("response"), str):
-                missing.append("response")
-            if not item.get("retrieved_context"):
-                missing.append("retrieved_context")
+            missing = _missing_keys(item)
             if missing:
                 logger.debug("Item %d missing %s - skipping.",
                              i, ", ".join(missing))
@@ -222,9 +232,7 @@ class FaithfulnessPipeline(BaseService):
         items = []
         dropped = 0
         for item in data:
-            if not isinstance(item, dict) or any(
-                not item.get(k) for k in REQUIRED_KEYS
-            ):
+            if _missing_keys(item):
                 dropped += 1
                 continue
             items.append(self._build_result_entry(item))

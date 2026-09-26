@@ -71,6 +71,7 @@ details.mb>div.band{margin-bottom:12px}
 .cell{flex:0 0 158px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .cell .k{font-size:11.5px;color:var(--muted)}
 .cell .k .mono{color:var(--fg)}
+.cell .k .nm{color:var(--fg);font-weight:600}
 .cell .v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1;margin:4px 0 2px}
 .cell .v small{font-size:11.5px;font-weight:400;color:var(--muted);margin-left:4px}
 .cell .bar{height:7px;margin-top:6px}

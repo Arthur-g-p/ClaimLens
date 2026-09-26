@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="claimlens-schema" content="5">
+<title>claimlens · compare</title>
+<style>
+/*COMMON_CSS*/
+.cap{font-size:12.5px;color:var(--muted);margin:0 0 10px;max-width:820px}
+.pair{margin-bottom:14px;padding:14px 16px 12px}
+.pair .itemhead{margin:0}
+.perr{color:var(--con);font-size:12.5px;margin-top:2px}
+.heads{display:flex;margin:8px 0 4px}
+.mh{text-align:center;padding:0 8px}
+.mh .nm{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.mh .v{font-size:34px;font-weight:600;line-height:1.15;letter-spacing:-.02em;margin:2px 0}
+.mh .v small{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0;margin-left:7px}
+.mh .s{font-size:12.5px;color:var(--muted);max-width:300px;margin:0 auto}
+svg.moon{width:100%;height:auto;display:block;overflow:visible}
+.rim{fill:none;stroke:var(--line);stroke-width:1.5}
+.rim.empty{stroke-dasharray:5 5}
+.lit{fill:var(--ent);fill-opacity:.14}
+.term{fill:none;stroke:var(--ent);stroke-opacity:.55;stroke-width:1.2}
+.arrow{stroke:var(--muted);stroke-width:1.5;fill:none}
+.arrowhead{fill:var(--muted)}
+.gapnote{fill:var(--muted);font-size:12px}
+.emptynote{fill:var(--muted);font-size:13px;font-style:italic}
+.d .hit{fill:transparent}
+.mk{transform-box:fill-box;transform-origin:center;transition:transform .12s}
+.mk circle{fill:var(--neu)}
+.mk.ent circle{fill:var(--ent)}.mk.con circle{fill:var(--con)}.mk.unj circle{fill:var(--unj)}
+.mk.neu circle{fill:none;stroke:var(--neu);stroke-width:2}
+.mk.ring circle{fill:none;stroke:var(--con);stroke-width:2.5}
+.mk .x{stroke:var(--card);stroke-width:2;stroke-linecap:round}
+.d:hover .mk,.d.on .mk{transform:scale(1.4)}
+.pair details.mb{margin:10px 0 0}
+.texts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.texts .card{white-space:pre-wrap;font-size:13.5px;line-height:1.55;background:var(--bg)}
+@media (max-width:760px){.texts{grid-template-columns:1fr}}
+</style></head><body>
+<script type="application/json" id="record">__RECORD__</script>
+<script type="application/json" id="findings">__FINDINGS__</script>
+<script type="application/json" id="roster">{
+  "groups": [
+    ["A", "its claims checked against the text of B", ["a_in_b", "a_contradicted"]],
+    ["B", "its claims checked against the text of A", ["b_in_a", "b_contradicted"]]
+  ],
+  "behavior": [],
+  "health": ["extraction_error_rate", "checker_failure_rate"],
+  "directions": {
+    "a_contradicted": "lower is better",
+    "b_contradicted": "lower is better",
+    "extraction_error_rate": "lower is better",
+    "checker_failure_rate": "lower is better"
+  },
+  "hierarchy_directions": {"a_in_b": "higher is better", "b_in_a": "higher is better"},
+  "ground_truth_suffix": " (ground truth)",
+  "hierarchy_labels": {
+    "none": {"a_in_b": "A in B", "a_contradicted": "A conflicts with B",
+             "b_in_a": "B in A", "b_contradicted": "B conflicts with A"},
+    "a": {"a_in_b": "recall", "a_contradicted": "ground truth B contradicts",
+          "b_in_a": "precision", "b_contradicted": "B claims the ground truth contradicts"},
+    "b": {"a_in_b": "precision", "a_contradicted": "A claims the ground truth contradicts",
+          "b_in_a": "recall", "b_contradicted": "ground truth A contradicts"}
+  },
+  "universes": {}
+}</script>
+<header>
+  <h1 id="title"></h1><span class="muted" id="meta"></span>
+  <span class="sp"></span>
+  <span class="seg" id="hier" title="Which text is the ground truth. Changes the words, never the numbers."></span>
+  <span class="seg" id="runseg"></span>
+</header>
+<div id="stage">
+  <div class="screen" id="run"></div>
+</div>
+<div id="tip" hidden></div>
+<script>
+/*COMMON_JS*/
+</script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const q = new URLSearchParams(location.search);
+  const ARGS = R._args || {};
+  const NAME = {a: "A", b: "B"}, OTHER = {a: "b", b: "a"};
+  // A text's verdicts live in the direction named after the text they were
+  // checked against: ragcheck's {reference}2{claims}.
+  const CELLS = {a: "b2a", b: "a2b"};
+  let hier = ["none", "a", "b"].includes(q.get("h")) ? q.get("h") : (ARGS.hierarchy === "a" || ARGS.hierarchy === "b") ? ARGS.hierarchy : "none";
+  let runIdx = Math.min(NRUNS - 1, Math.max(0, +(q.get("run") || 0)));
+  const stage = $('stage');
+  $('title').textContent = titleFor("compare");
+  $('meta').innerHTML = metaLine();
+
+  // ── the hierarchy: words only, the numbers never move ─────────────
+  const BASE_GROUPS = ROSTER.groups, BASE_DIRS = Object.assign({}, DIR);
+  function applyHierarchy(){
+    ROSTER.groups = BASE_GROUPS.map(([name, desc, keys]) => [name + (hier !== "none" && name === NAME[hier] ? ROSTER.ground_truth_suffix : ""), desc, keys]);
+    for(const k of Object.keys(DIR)) delete DIR[k];
+    Object.assign(DIR, BASE_DIRS, hier === "none" ? {} : ROSTER.hierarchy_directions);
+    // Only a ground truth gives the metrics a name; without one the key stands alone.
+    ROSTER.labels = hier === "none" ? {} : ROSTER.hierarchy_labels[hier];
+  }
+  const label = k => ROSTER.hierarchy_labels[hier][k];
+  function word(side, verdict){
+    const other = NAME[OTHER[side]];
+    if(verdict === "Entailment") return (hier === OTHER[side] ? "backed by " : "in ") + other;
+    // Under a ground truth every contradiction is the other text's error, so
+    // the side at fault is always the one doing the contradicting.
+    if(verdict === "Contradiction") return hier === "none" ? "conflicts with " + other : hier === side ? other + " contradicts this" : "contradicted by the ground truth";
+    if(verdict == null) return "unjudged";
+    return hier === OTHER[side] ? "not backed by " + other : hier === side ? "dropped: not in " + other : "not in " + other;
+  }
+  const cls = v => v === "Entailment" ? "ent" : v === "Contradiction" ? "con" : v == null ? "unj" : "neu";
+  function renderHier(){
+    $('hier').innerHTML = [["none", "no hierarchy"], ["a", "A is ground truth"], ["b", "B is ground truth"]]
+      .map(([k, t]) => '<button class="' + (k === hier ? "on" : "") + '" data-h="' + k + '">' + t + "</button>").join("");
+  }
+
+  // ── the two circles of one pair ───────────────────────────────────
+  // One dot per claim; a circle's area grows with its claim count. The
+  // dots the other text states sit on the side facing it, contradictions at
+  // the edge of that lit side, the rest on the far side. Nothing connects a
+  // dot to a dot: no claim is matched to another claim.
+  const RANK = v => v === "Entailment" ? 0 : v === "Contradiction" ? 1 : v == null ? 2 : 3;
+  const dist = (p, c) => Math.hypot(p[0] - c[0], p[1] - c[1]);
+  function sunflower(n, radius, c){
+    const g = Math.PI * (3 - Math.sqrt(5)), out = [];
+    for(let i = 0; i < n; i++){ const r = radius * Math.sqrt((i + 0.5) / n), t = i * g; out.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]); }
+    return out;
+  }
+  function mark(k, r){
+    const x = (r * 0.5).toFixed(1);
+    return '<g class="mk ' + k + '"><circle r="' + (k === "neu" ? r - 1 : r).toFixed(1) + '"/>'
+      + (k === "con" ? '<path class="x" d="M-' + x + ",-" + x + "L" + x + "," + x + "M-" + x + "," + x + "L" + x + ",-" + x + '"/>' : "") + "</g>";
+  }
+  function moons(it, p){
+    const n = {a: (it.a_claims || []).length, b: (it.b_claims || []).length}, GAP = 190;
+    // One spacing for both circles, so their areas compare; the larger caps the scale.
+    const sp = Math.min(34, 250 / Math.sqrt(Math.max(n.a, n.b, 1) / Math.PI));
+    const rad = k => sp * Math.sqrt(Math.max(k, 1) / Math.PI) + sp * 0.6;
+    const r = {a: rad(n.a), b: rad(n.b)}, span = 2 * r.a + GAP + 2 * r.b;
+    const W = Math.max(900, span + 40), H = 2 * Math.max(r.a, r.b) + 24, cy = H / 2;
+    const c = {a: [(W - span) / 2 + r.a, cy]};
+    c.b = [c.a[0] + r.a + GAP + r.b, cy];
+    const mr = sp * 0.26, hr = sp * 0.48, f = x => x.toFixed(1);
+    let defs = "", lit = "", rims = "", notes = "", dots = "";
+    for(const side of ["a", "b"]){
+      const other = c[OTHER[side]], cells = it[CELLS[side]] || [], clip = "clip" + p + side;
+      defs += '<clipPath id="' + clip + '"><circle cx="' + f(c[side][0]) + '" cy="' + f(cy) + '" r="' + f(r[side]) + '"/></clipPath>';
+      rims += '<circle class="rim' + (n[side] ? "" : " empty") + '" cx="' + f(c[side][0]) + '" cy="' + f(cy) + '" r="' + f(r[side]) + '"/>';
+      if(!n[side]){
+        notes += '<text class="emptynote" x="' + f(c[side][0]) + '" y="' + f(cy + 4) + '" text-anchor="middle">' + ((it.extraction_errors || {})[side] ? "extraction failed" : "no claims") + "</text>";
+        continue;
+      }
+      const pts = sunflower(n[side], r[side] - sp * 0.55, c[side]).sort((u, w) => dist(u, other) - dist(w, other));
+      const order = it[side + "_claims"].map((_, i) => i).sort((i, j) => RANK(V(cells[i]).verdict) - RANK(V(cells[j]).verdict) || i - j);
+      order.forEach((ci, slot) => { const [x, y] = pts[slot];
+        dots += '<g class="d" data-p="' + p + '" data-s="' + side + '" data-i="' + ci + '" transform="translate(' + f(x) + " " + f(y) + ')"><circle class="hit" r="' + f(hr) + '"/>' + mark(V(cells[ci]).verdict === "Contradiction" && hier === side ? "ring" : cls(V(cells[ci]).verdict), mr) + "</g>"; });
+      const k = cells.filter(cc => V(cc).verdict === "Entailment").length, d = pts.map(pt => dist(pt, other));
+      if(k){ const rho = k >= d.length ? d[d.length - 1] + sp : (d[k - 1] + d[k]) / 2;
+        lit += '<g clip-path="url(#' + clip + ')"><circle class="lit" cx="' + f(other[0]) + '" cy="' + f(cy) + '" r="' + f(rho) + '"/><circle class="term" cx="' + f(other[0]) + '" cy="' + f(cy) + '" r="' + f(rho) + '"/></g>'; }
+    }
+    const gx0 = c.a[0] + r.a + 12, gx1 = c.b[0] - r.b - 12, gm = (gx0 + gx1) / 2, ah = "ah" + p;
+    defs += '<marker id="' + ah + '" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>';
+    const arrows = '<line class="arrow" x1="' + f(gx1) + '" y1="' + f(cy - 10) + '" x2="' + f(gx0) + '" y2="' + f(cy - 10) + '" marker-end="url(#' + ah + ')"/>'
+      + '<line class="arrow" x1="' + f(gx0) + '" y1="' + f(cy + 10) + '" x2="' + f(gx1) + '" y2="' + f(cy + 10) + '" marker-end="url(#' + ah + ')"/>'
+      + '<text class="gapnote" x="' + f(gm) + '" y="' + f(cy + 32) + '" text-anchor="middle">each side checked</text>'
+      + '<text class="gapnote" x="' + f(gm) + '" y="' + f(cy + 47) + '" text-anchor="middle">against the other text</text>';
+    const svg = '<svg class="moon" viewBox="0 0 ' + f(W) + " " + f(H) + '" role="img" aria-label="A and B, one dot per claim"><defs>' + defs + "</defs>" + lit + rims + arrows + notes + dots + "</svg>";
+    return {svg, split: 2 * c.a[0] / W * 100};
+  }
+
+  // ── one pair: the numbers over each circle, the circles, the texts ──
+  function head(it, side, width){
+    const cells = it[CELLS[side]] || [], n = (it[side + "_claims"] || []).length, err = (it.extraction_errors || {})[side];
+    const count = v => cells.filter(c => V(c).verdict === v).length, ent = count("Entailment"), con = count("Contradiction"), unj = count(null);
+    const m = (it.metrics || {})[side + "_in_" + OTHER[side]];
+    let s = err ? "extraction failed (" + esc(err) + ")" : !n ? "no claims" : ent + " of " + (n - unj) + " claims " + esc(word(side, "Entailment"));
+    if(!err && con) s += " · " + (hier === "none" ? con + " in conflict with " + NAME[OTHER[side]] : hier === side ? NAME[OTHER[side]] + " contradicts " + con : con + " contradicted by the ground truth");
+    if(!err && unj) s += " · " + unj + " unjudged";
+    return '<div class="mh" style="width:' + width.toFixed(2) + '%"><div class="nm">' + NAME[side] + (hier === side ? " · ground truth" : "") + " · " + n + " claim" + (n === 1 ? "" : "s") + "</div>"
+      + '<div class="v">' + (m == null ? '<span class="na">n/a</span>' : m.toFixed(2)) + "<small>" + esc(label(side + "_in_" + OTHER[side])) + "</small></div>"
+      + '<div class="s">' + s + "</div></div>";
+  }
+  function textsHtml(it){
+    const col = side => "<div><h3>" + NAME[side] + ' <span class="sub">' + String(it[side] || "").split(/\s+/).filter(Boolean).length + " words</span></h3>"
+      + '<div class="card">' + (it[side] ? esc(it[side]) : '<span class="na">(empty text)</span>') + "</div></div>";
+    return '<details class="mb"><summary>The two texts</summary><div class="texts">' + col("a") + col("b") + "</div></details>";
+  }
+  function claimsHtml(it){
+    const table = side => {
+      const rows = (it[side + "_claims"] || []).map((c, i) => { const v = V((it[CELLS[side]] || [])[i]);
+        return '<tr><td class="num">' + (i + 1) + "</td><td>" + esc(ct(c)) + '</td><td><span class="pill ' + cls(v.verdict) + '">' + esc(word(side, v.verdict)) + '</span></td><td class="muted">' + esc(v.explanation || v.error || "") + "</td></tr>"; }).join("");
+      return "<h3>" + NAME[side] + ' claims <span class="sub">checked against the text of ' + NAME[OTHER[side]] + "</span></h3>"
+        + '<table><tr><th class="num">#</th><th>claim</th><th>verdict</th><th>checker explanation</th></tr>' + (rows || '<tr><td colspan="4" class="na">no claims</td></tr>') + "</table>"; };
+    return '<details class="mb"><summary>Every claim with its verdict</summary>' + table("a") + table("b") + "</details>";
+  }
+  function pairHtml(it, p){
+    const fig = moons(it, p), errs = Object.entries(it.extraction_errors || {});
+    return '<div class="card pair"><div class="itemhead"><h2>#' + (p + 1) + ' <span class="mono">' + esc(it.id) + "</span></h2></div>"
+      + (errs.length ? '<div class="perr">extraction failed: ' + errs.map(([s, c]) => (NAME[s] || esc(s)) + " (" + esc(c) + ")").join(", ") + " · this pair is excluded from every metric</div>" : "")
+      + '<div class="heads">' + head(it, "a", fig.split) + head(it, "b", 100 - fig.split) + "</div>" + fig.svg
+      + textsHtml(it) + claimsHtml(it) + "</div>";
+  }
+
+  // ── the screen: the shared run metrics, then the pairs of the selected run ──
+  function render(){
+    hideTip();
+    const run = R.runs[runIdx], items = run.items || [];
+    let h = runMetrics(run);
+    h += '<div class="items"><h2><span class="hd">Pairs</span><span>· ' + (NRUNS > 1 ? "run " + (runIdx + 1) + " · " : "")
+      + (hier === "none" ? "one dot per claim · lime = in the other text · red ✕ = conflicts with it · ring = not in it · amber = unjudged"
+         : "one dot per claim · lime = in the other text · red ring = a ground-truth claim the other text contradicts · red ✕ = a claim the ground truth contradicts · grey ring = not in it · amber = unjudged") + "</span></h2>"
+      + '<p class="cap">Each circle is one text; its area grows with its number of claims. The lit side faces the other text and holds the claims that text states. The circles never overlap: a claim is only ever checked against the other text, never matched to another claim. Hover a dot for the claim and the checker\'s explanation.</p>'
+      + (items.length ? items.map(pairHtml).join("") : '<div class="na">no pairs were evaluated</div>') + "</div>";
+    $('run').innerHTML = h;
+  }
+
+  // ── hover: the shared tooltip, fixed above everything ─────────────
+  function dotTip(it, side, i){
+    const v = V((it[CELLS[side]] || [])[i]);
+    return '<div class="r"><span class="pill ' + cls(v.verdict) + '">' + esc(word(side, v.verdict)) + "</span></div>"
+      + '<div class="r">' + esc(ct(it[side + "_claims"][i])) + "</div>"
+      + '<div class="r muted">' + esc(v.explanation || (v.verdict == null ? "no verdict: " + (v.error || "checker failure") : "(no explanation recorded)")) + "</div>"
+      + '<div class="r muted">' + NAME[side] + " claim " + (i + 1) + " of " + it[side + "_claims"].length + "</div>";
+  }
+  $('run').addEventListener("mouseover", e => { const d = e.target.closest(".d"); if(!d || d.contains(e.relatedTarget)) return;
+    d.classList.add("on"); showTip(dotTip(R.runs[runIdx].items[+d.dataset.p], d.dataset.s, +d.dataset.i), e.clientX, e.clientY); });
+  $('run').addEventListener("mousemove", e => { if(!tipHidden()) placeTip(e.clientX, e.clientY); });
+  $('run').addEventListener("mouseout", e => { const d = e.target.closest(".d"); if(!d || d.contains(e.relatedTarget)) return; d.classList.remove("on"); hideTip(); });
+  stage.addEventListener("scroll", () => { if(!tipHidden()) hideTip(); });
+
+  $('hier').addEventListener("click", e => { const b = e.target.closest("button[data-h]"); if(!b) return; hier = b.dataset.h; applyHierarchy(); renderHier(); render(); });
+  $('runseg').addEventListener("click", e => { const b = e.target.closest("button[data-r]"); if(!b) return; runIdx = +b.dataset.r; runSeg($('runseg'), runIdx); render(); });
+
+  applyHierarchy(); renderHier(); runSeg($('runseg'), runIdx); render();
+})();
+</script>
+</body></html>
