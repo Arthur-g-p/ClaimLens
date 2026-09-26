@@ -80,12 +80,12 @@ svg.moon{width:100%;height:auto;display:block;overflow:visible}
 (function(){
   const $ = id => document.getElementById(id);
   const q = new URLSearchParams(location.search);
-  const ARGS = R._args || {};
   const NAME = {a: "A", b: "B"}, OTHER = {a: "b", b: "a"};
   // A text's verdicts live in the direction named after the text they were
   // checked against: ragcheck's {reference}2{claims}.
   const CELLS = {a: "b2a", b: "a2b"};
-  let hier = ["none", "a", "b"].includes(q.get("h")) ? q.get("h") : (ARGS.hierarchy === "a" || ARGS.hierarchy === "b") ? ARGS.hierarchy : "none";
+  // The report is neutral; reading it with a ground truth is the reader's switch.
+  let hier = ["none", "a", "b"].includes(q.get("h")) ? q.get("h") : "none";
   let runIdx = Math.min(NRUNS - 1, Math.max(0, +(q.get("run") || 0)));
   const stage = $('stage');
   $('title').textContent = titleFor("compare");

@@ -13,9 +13,9 @@ dropping it), so claim-to-claim matching has no stable answer.
 
 Direction names follow ragcheck's {reference}2{claims}. With a as the
 ground truth these are ragcheck's two generator directions exactly:
-a2b is answer2response (precision), b2a is response2answer (recall). That
-is what ``hierarchy`` declares, and all it changes is words: the record
-keeps neutral keys (a_in_b, b_in_a, ...), so one run can be read either way.
+a2b is answer2response (precision), b2a is response2answer (recall). The
+numbers stay neutral (a_in_b, b_in_a, ...): which text is right is the
+reader's call, made in the HTML report, so one run serves either reading.
 """
 
 import time
@@ -47,7 +47,6 @@ logger = settings.get_logger(__name__)
 
 REQUIRED_KEYS = ("a", "b")
 NAMES = {"a": "A", "b": "B"}
-HIERARCHIES = (None, "a", "b")
 
 # Per-item metrics, A's side first: the share of a text's judged claims the
 # other text states, and the share it contradicts.
@@ -136,13 +135,25 @@ class ComparePipeline(BaseService):
     """2 extractions + 2 flat checking directions: two texts, both ways."""
 
     _RUN_SUMMARY_KEYS = ("a_in_b", "b_in_a")
+    _VARIANCE_SECTIONS = {
+        "metrics": [(NAMES["a"], ["a_in_b", "a_contradicted"]),
+                    (NAMES["b"], ["b_in_a", "b_contradicted"])],
+        "behavior": [],
+        "health": ["extraction_error_rate", "checker_failure_rate"],
+    }
+    # Neutral words: without a ground truth a contradiction is a conflict
+    # nobody is blamed for, and more overlap is neither better nor worse.
+    _VARIANCE_LABELS = {"a_in_b": "A in B", "a_contradicted": "A conflicts with B",
+                        "b_in_a": "B in A", "b_contradicted": "B conflicts with A"}
+    _METRIC_DIRECTIONS = {"a_contradicted": "lower is better", "b_contradicted": "lower is better",
+                          "extraction_error_rate": "lower is better",
+                          "checker_failure_rate": "lower is better"}
 
     def __init__(
         self,
         extractor_model: str,
         checker_model: str,
         *,
-        hierarchy: str | None = None,
         extractor_base_url: str | None = None,
         checker_base_url: str | None = None,
         concurrency: int = 10,
@@ -153,13 +164,8 @@ class ComparePipeline(BaseService):
         verbosity: str = "full",
         runs: int = 1,
     ):
-        if hierarchy not in HIERARCHIES:
-            raise InvalidInputError(
-                f"hierarchy must be 'a', 'b' or unset (no hierarchy), got {hierarchy!r}."
-            )
         self._extractor_model = extractor_model
         self._checker_model = checker_model
-        self._hierarchy = hierarchy
         self._init_verbosity(verbosity)
         self._runs = max(1, runs)
         child_verbosity = (
@@ -174,26 +180,6 @@ class ComparePipeline(BaseService):
 
         self._kg = {side: f"{extractor_model}_{side}_kg" for side in REQUIRED_KEYS}
         self._err = {side: f"{extractor_model}_{side}_extraction_error" for side in REQUIRED_KEYS}
-
-        # Labels and groups follow the hierarchy, so the Metrics tree and
-        # the variance block always speak the same words.
-        self._groups = {side: NAMES[side] + (" (ground truth)" if side == hierarchy else "")
-                        for side in REQUIRED_KEYS}
-        self._VARIANCE_LABELS = {name: self._label(name) for name in METRIC_NAMES}
-        self._VARIANCE_SECTIONS = {
-            "metrics": [(self._groups["a"], ["a_in_b", "a_contradicted"]),
-                        (self._groups["b"], ["b_in_a", "b_contradicted"])],
-            "behavior": [],
-            "health": ["extraction_error_rate", "checker_failure_rate"],
-        }
-        self._METRIC_DIRECTIONS = {
-            "a_contradicted": "lower is better", "b_contradicted": "lower is better",
-            "extraction_error_rate": "lower is better",
-            "checker_failure_rate": "lower is better",
-        }
-        if hierarchy:
-            # Without a ground truth, more overlap is neither better nor worse.
-            self._METRIC_DIRECTIONS.update(a_in_b="higher is better", b_in_a="higher is better")
 
         # Compose the services. Each fail-fasts on its own API key here.
         # mark_abstention=False on both: neither text is a response, so an
@@ -238,24 +224,6 @@ class ComparePipeline(BaseService):
                 Direction(name=name, kg_key=self._kg[claims], reference_key=reference),
                 service,
             ))
-
-    def _label(self, metric: str) -> str:
-        """Plain-English label for one side metric under the hierarchy.
-
-        Without a ground truth a contradiction is a conflict nobody is blamed
-        for. With one, every contradiction is the other text's error, so the
-        label makes the side at fault the one doing the contradicting."""
-        side, other = ("a", "b") if metric.startswith("a") else ("b", "a")
-        contradicted = metric.endswith("_contradicted")
-        if self._hierarchy is None:
-            return f"{NAMES[side]} {'conflicts with' if contradicted else 'in'} {NAMES[other]}"
-        if contradicted:
-            if side == self._hierarchy:
-                return f"ground truth {NAMES[other]} contradicts"
-            return f"{NAMES[side]} claims the ground truth contradicts"
-        # Ground-truth claims found in the other text is recall; the other
-        # text's claims backed by the ground truth is precision.
-        return "recall" if side == self._hierarchy else "precision"
 
     # -- Pipeline: the BaseService 7-step run() shape --
 
@@ -437,8 +405,8 @@ class ComparePipeline(BaseService):
         ``a_not_in_b`` / ``b_not_in_a`` (the other text does not state the
         claim), ``a_contradicted`` / ``b_contradicted`` (the other text
         contradicts it), ``unjudged`` (no verdict, with its side and cause),
-        ``extraction_failed``. Keys stay neutral whatever the hierarchy —
-        it changes words, never data. A pure view over the record's items."""
+        ``extraction_failed``. Keys are neutral: which side is right is the
+        reader's call. A pure view over the record's items."""
         def classify(item: dict):
             head = {"id": item["id"]}
             if item.get("extraction_errors"):
@@ -493,15 +461,10 @@ class ComparePipeline(BaseService):
         if self.verbosity != "full":
             return
         checking = self._directions[0][1]
-        if self._hierarchy is None:
-            hierarchy = "none — a symmetric comparison"
-        else:
-            hierarchy = f"{NAMES[self._hierarchy]} is the ground truth"
         logger.info(" ⚙️  Config")
         logger.info("    Extractor:   %s", _location(self._extract["a"]))
         logger.info("    Checker:     %s", _location(checking))
         logger.info("    Mode:        %s", checking.mode_label)
-        logger.info("    Hierarchy:   %s", hierarchy)
         logger.info("    Directions:  %s",
                     ", ".join(d.name for d, _ in self._directions))
         logger.info("    Prompts:     %s", settings.PROMPT_PATH)
@@ -561,7 +524,7 @@ class ComparePipeline(BaseService):
         logger.info(" 📊 Metrics  (macro over %d items)", n)
         for side, other in (("a", "b"), ("b", "a")):
             logger.info("    %s — its claims checked against the text of %s",
-                        self._groups[side], NAMES[other])
+                        NAMES[side], NAMES[other])
             for metric, last in ((f"{side}_in_{other}", False), (f"{side}_contradicted", True)):
                 logger.info("     %s %-*s%s", "└─" if last else "├─", width,
                             f"{labels[metric]}:", fmt(metric))

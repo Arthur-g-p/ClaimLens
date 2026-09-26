@@ -93,13 +93,12 @@ class TestBatchVerbs:
 
     def test_compare_one_pair_of_texts(self, monkeypatch):
         monkeypatch.setattr("claimlens.pipelines.compare.ComparePipeline", _FakePipeline)
-        record, findings = claimlens.compare("full text", "summary", extractor_model="e",
-                                             checker_model="c", hierarchy="a")
+        record, findings = claimlens.compare("first text", "second text", extractor_model="e",
+                                             checker_model="c", concurrency=3)
         p = _FakePipeline.instances[0]
-        assert p.ran == [{"a": "full text", "b": "summary"}]
-        assert p.kwargs == {"extractor_model": "e", "checker_model": "c", "hierarchy": "a"}
+        assert p.ran == [{"a": "first text", "b": "second text"}]
+        assert p.kwargs == {"extractor_model": "e", "checker_model": "c", "concurrency": 3}
         assert record["_args"]["command"] == "compare"
-        assert record["_args"]["hierarchy"] == "a"
         assert findings["_args"] == record["_args"]
 
     def test_compare_many_items(self, monkeypatch):

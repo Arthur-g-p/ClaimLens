@@ -140,9 +140,9 @@ def compare(a: str | list[dict], b: str | None = None, *, extractor_model: str,
             checker_model: str, **kwargs) -> Report:
     """Two texts, claim by claim, both ways: each text's claims are checked
     against the other text. ``compare(a, b)`` for one pair, ``compare(items)``
-    for many (items need ``a`` and ``b``, and may carry an ``id``).
-    ``hierarchy="a"`` or ``"b"`` names the ground truth and changes only the
-    words. Extra keyword arguments go to ComparePipeline.
+    for many (items need ``a`` and ``b``, and may carry an ``id``). The
+    numbers are neutral; reading them with one text as the ground truth is
+    the HTML report's switch. Extra keyword arguments go to ComparePipeline.
     Returns (record, findings)."""
     _no_running_loop("compare", "await claimlens.acompare(...)")
     from claimlens.pipelines.compare import ComparePipeline

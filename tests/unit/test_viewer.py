@@ -21,9 +21,6 @@ from claimlens.utils import REPORT_SCHEMA_VERSION, build_meta
 from claimlens.viewer import TEMPLATES, render_html, supported_report_types, write_html
 
 TYPES = ["compare", "faithcheck", "ragcheck"]
-# Rosters fixed per pipeline class; compare's groups, directions and labels
-# follow each run's hierarchy, so it has its own parity test per hierarchy.
-STATIC_ROSTER_TYPES = ["faithcheck", "ragcheck"]
 PIPELINES = {
     "ragcheck": ("claimlens.pipelines.ragchecker", "RagCheckerPipeline"),
     "faithcheck": ("claimlens.pipelines.faithfulness", "FaithfulnessPipeline"),
@@ -198,7 +195,7 @@ class TestRosterParity:
         assert m, f"{report_type}.html has no roster island"
         return json.loads(m.group(1))
 
-    @pytest.mark.parametrize("report_type", STATIC_ROSTER_TYPES)
+    @pytest.mark.parametrize("report_type", TYPES)
     def test_groups_behavior_health_and_directions_match_the_pipeline(self, report_type):
         P = _pipeline(report_type)
         roster = self._roster(report_type)
@@ -207,23 +204,24 @@ class TestRosterParity:
         assert roster["health"] == list(P._VARIANCE_SECTIONS["health"])
         assert roster["directions"] == P._METRIC_DIRECTIONS
 
-    @pytest.mark.parametrize("hierarchy", [None, "a", "b"])
-    def test_compare_roster_under_each_hierarchy_matches_the_pipeline(self, hierarchy):
-        from unittest.mock import patch
+    def test_compare_page_speaks_the_consoles_words_without_a_ground_truth(self):
         from claimlens.pipelines.compare import ComparePipeline
-        with patch("claimlens.services.extraction.Extractor"), \
-             patch("claimlens.services.checking.Checker"):
-            p = ComparePipeline(extractor_model="e", checker_model="c", hierarchy=hierarchy)
-        roster = self._roster("compare")
-        suffix = roster["ground_truth_suffix"]
-        groups = [(name + (suffix if hierarchy and name == hierarchy.upper() else ""), keys)
-                  for name, _, keys in roster["groups"]]
-        assert groups == [(n, list(k)) for n, k in p._VARIANCE_SECTIONS["metrics"]]
-        assert roster["behavior"] == p._VARIANCE_SECTIONS["behavior"]
-        assert roster["health"] == p._VARIANCE_SECTIONS["health"]
-        directions = {**roster["directions"], **(roster["hierarchy_directions"] if hierarchy else {})}
-        assert directions == p._METRIC_DIRECTIONS
-        assert roster["hierarchy_labels"][hierarchy or "none"] == p._VARIANCE_LABELS
+        assert self._roster("compare")["hierarchy_labels"]["none"] == ComparePipeline._VARIANCE_LABELS
+
+    @pytest.mark.parametrize("truth,other", [("a", "b"), ("b", "a")])
+    def test_compare_page_charges_every_contradiction_to_the_other_text(self, truth, other):
+        """The ground-truth reading exists only in the page: the ground
+        truth's claims found in the other text are recall, the other text's
+        claims backed by it precision, and the side at fault is always the
+        one doing the contradicting."""
+        labels = self._roster("compare")["hierarchy_labels"][truth]
+        T, O = truth.upper(), other.upper()
+        assert labels == {
+            f"{truth}_in_{other}": "recall",
+            f"{other}_in_{truth}": "precision",
+            f"{truth}_contradicted": f"ground truth {O} contradicts",
+            f"{other}_contradicted": f"{O} claims the ground truth contradicts",
+        }
 
     @pytest.mark.parametrize("report_type", TYPES)
     def test_universes_name_real_abstention_counts(self, report_type):

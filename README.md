@@ -17,6 +17,7 @@ disagree with.
 | `ragcheck` | RAGChecker-style RAG evaluation: 2 extractions + 4 checking directions, one self-contained JSON report (precision, recall, F1, faithfulness, and claim-level detail) |
 | `faithcheck` | Faithfulness checking **without ground truth**: response claims vs the retrieved context. Works on live traffic. |
 | `refcheck` | Classic reference checking: extraction + checking in one pass |
+| `compare` | Two texts, claim by claim, both ways: each text's claims are checked against the other text, never matched to each other. If one text is your ground truth, the HTML report reads the two overlaps as recall and precision |
 | `extract` / `check` / `atomize` | The individual building blocks, runnable standalone — walked through in order under [examples/](examples/README.md) |
 | `eval extractor` / `eval checker` | Meta-evaluation: measure the extractor and checker themselves against labeled data. Run `eval checker` first — `eval extractor` uses a checker, so an unqualified one makes its numbers partial |
 
@@ -25,10 +26,13 @@ disagree with.
 - **Auditable**: every metric decomposes into claim-level verdicts with
   explanations. You can see exactly which fact failed and why.
 - **Variance is first-class**: LLM-based metrics are stochastic. Pass
-  `--runs N` to `ragcheck`, `faithcheck`, `eval extractor` or
+  `--runs N` to `ragcheck`, `faithcheck`, `compare`, `eval extractor` or
   `eval checker` and get `mean +/- std [min, max]` per metric across N
   full repetitions, plus each run's complete report. A single-run score
-  overstates your certainty.
+  overstates your certainty. Note: first passes run at temperature 0, so
+  the spread mostly reflects provider-side nondeterminism (plus the few
+  claims that needed a retry), not sampling. Read it as a lower bound on
+  run-to-run variation.
 - **The evaluator is itself evaluated**: `eval extractor` and
   `eval checker` measure the measurement tool against ground-truth
   labels, so you know how much to trust the numbers before you compare
@@ -145,7 +149,8 @@ bare, with no flag in front of it.
 
 You do not need to prepare data to start. `examples/` ships a five-step
 walkthrough over one dataset, where each step needs a little more than the last,
-plus `eval_data/` with human-labelled data for the `eval` commands.
+a sixth step for `compare`, plus `eval_data/` with human-labelled data for the
+`eval` commands.
 
 Start at step 01 — decompose responses into claims:
 
@@ -172,13 +177,25 @@ Check faithfulness with no ground truth at all (step 04):
 claimlens faithcheck examples/faithcheck/kepler22b.json --extractor-model gpt-4o-mini --checker-model gpt-4o-mini
 ```
 
+Compare two texts claim by claim, each against the other (step 06):
+
+```bash
+claimlens compare examples/compare/kepler22b.json --extractor-model gpt-4o-mini --checker-model gpt-4o-mini
+```
+
+The numbers are neutral: how much of A is in B, how much of B is in A, and
+where the two conflict. If one text is your ground truth, the HTML report
+reads them for you: switch it to "A is ground truth" and `a_in_b` becomes
+**recall**, `b_in_a` **precision**, and every contradiction is charged to the
+other text.
+
 The model flags have short aliases (`-e`, `-c`, `-m`), but the long names are
 spelled the same way in every command, so those are the ones worth learning.
 [examples/README.md](examples/README.md) lists which fields and which arguments
 each step needs.
 
-The pipelines and evals (`ragcheck`, `faithcheck`, `refcheck`, `eval
-extractor`, `eval checker`) write two JSON files. The record holds everything: an `_args` block (what
+The pipelines and evals (`ragcheck`, `faithcheck`, `refcheck`, `compare`,
+`eval extractor`, `eval checker`) write two JSON files. The record holds everything: an `_args` block (what
 you asked for — every flag of the invocation), a `_meta` block (what the run
 turned out to be — counts, timings, derived keys), `metrics` where the command
 computes any, every count the console prints, and the complete per-item
@@ -188,7 +205,7 @@ the console's own branch names, derived from the record. The building
 blocks (`extract`, `check`, `atomize`) instead emit the item list itself,
 enriched in place, so each one's output is the next one's input.
 
-`ragcheck` and `faithcheck` write a third file next to those two:
+`ragcheck`, `faithcheck` and `compare` write a third file next to those two:
 `{report_stem}.html`, a self-contained viewer of the same record. One screen for the run — the main
 metrics with their spread over `--runs`, then every item as a row of dots,
 one per response claim, lime when a chunk grounds it — and one screen per
@@ -196,13 +213,16 @@ item: GT claims, retrieved chunks and response claims in three columns with
 the verdicts drawn as lines between them, hover for the checker's
 explanation. `faithcheck`'s item screen is the response text, then its claims
 and the retrieved chunks, each highlighted by whether a chunk entails or
-contradicts the claim. Both open with a double-click, need no server and load
-nothing from the network. `--no-html` skips them.
+contradicts the claim. `compare` shows the same run metrics, then every pair as
+two circles, one per text and one dot per claim: the side facing the other text
+lights up with the claims that text states, contradictions sit at its edge, and
+the two texts stand side by side below. All three open with a double-click,
+need no server and load nothing from the network. `--no-html` skips them.
 `claimlens --help` lists all commands and flags.
 
 ## Use it from Python
 
-The library is the same five verbs as the CLI, with the same keyword names
+The library is the same six verbs as the CLI, with the same keyword names
 as its flags. Keys come from `EXTRACTOR_API_KEY` and `CHECKER_API_KEY` in
 the environment or a `.env`, never as arguments.
 
@@ -215,12 +235,15 @@ record, findings = claimlens.ragcheck(items, extractor_model="gpt-4o-mini", chec
 record["metrics"]["faithfulness"]
 findings["hallucination"]          # the review queue, the same as the _findings.json file
 
+record, findings = claimlens.compare(text_a, text_b, extractor_model="gpt-4o-mini", checker_model="gpt-4o-mini")
+
 items = claimlens.extract(items, extractor_model="gpt-4o-mini")
 ```
 
-`ragcheck`, `faithcheck` and `refcheck` return the record and the findings,
-the two documents the CLI writes. `claimlens.render_html(record, findings)`
-returns the viewer page for a `ragcheck` or `faithcheck` record as a string, the same page
+`ragcheck`, `faithcheck`, `refcheck` and `compare` return the record and the
+findings, the two documents the CLI writes. `compare` takes two texts, or a
+list of items with `a`, `b` and an optional `id`. `claimlens.render_html(record, findings)`
+returns the viewer page for a `ragcheck`, `faithcheck` or `compare` record as a string, the same page
 the CLI writes as `{report_stem}.html`; `claimlens.write_html(record, findings, "report.html")`
 writes it and returns the path. Both read the report type from the record. `extract` and `check` return the enriched
 item list. Extra keyword arguments go to the pipeline (`concurrency`,
@@ -229,8 +252,9 @@ for it: `claimlens.enable_logging()` turns the console output on, and
 `verbosity="compact"` or `"silent"` per call sets how much.
 
 **Inside a running event loop** (a Jupyter cell, an async server) the sync
-verbs refuse with a message that says so. Use the pipeline classes with
-`await`. It is the same code:
+verbs refuse with a message that says so. `compare` has an async twin,
+`await claimlens.acompare(text_a, text_b, ...)`; for the others use the
+pipeline classes with `await`. It is the same code:
 
 ```python
 from claimlens.pipelines.ragchecker import RagCheckerPipeline

@@ -1,6 +1,6 @@
 """
 Unit tests for ComparePipeline: validation, direction wiring, the report
-projection, the hierarchy's words, and the claim that ragcheck's precision
+projection, the neutral words, and the claim that ragcheck's precision
 and recall are compare with the GT answer as ground truth. Workers patched
 out at construction — no LLM.
 """
@@ -75,11 +75,6 @@ class TestConstruction:
         """Neither text is a response: an empty extraction is a text that
         states nothing, not a refusal."""
         assert all(not s._mark_abstention for s in pipeline._extract.values())
-
-    @pytest.mark.parametrize("hierarchy", ["A", "gt", "both", ""])
-    def test_unknown_hierarchy_fails_fast(self, hierarchy):
-        with pytest.raises(InvalidInputError):
-            _pipeline(hierarchy=hierarchy)
 
 
 # ── Validation ───────────────────────────────────────────────────────────────
@@ -212,51 +207,30 @@ class TestBuildRun:
         assert findings["b_contradicted"] == []    # the whole item is out
 
 
-# ── The hierarchy: words only ────────────────────────────────────────────────
+# ── The words: neutral, the reading is the reader's ─────────────────────────
 
-class TestHierarchy:
+class TestWords:
 
-    @pytest.mark.parametrize("hierarchy,a_in_b,b_in_a", [
-        (None, "A in B", "B in A"),
-        ("a", "recall", "precision"),
-        ("b", "precision", "recall"),
-    ])
-    def test_labels(self, hierarchy, a_in_b, b_in_a):
-        p = _pipeline(hierarchy=hierarchy)
-        assert p._VARIANCE_LABELS["a_in_b"] == a_in_b
-        assert p._VARIANCE_LABELS["b_in_a"] == b_in_a
+    def test_labels_blame_nobody(self, pipeline):
+        """Which text is right is the reader's call, made in the HTML report;
+        the console says what was measured and nothing more."""
+        assert pipeline._VARIANCE_LABELS == {
+            "a_in_b": "A in B", "a_contradicted": "A conflicts with B",
+            "b_in_a": "B in A", "b_contradicted": "B conflicts with A"}
 
-    @pytest.mark.parametrize("hierarchy,a_contradicted,b_contradicted", [
-        (None, "A conflicts with B", "B conflicts with A"),
-        ("a", "ground truth B contradicts", "B claims the ground truth contradicts"),
-        ("b", "A claims the ground truth contradicts", "ground truth A contradicts"),
-    ])
-    def test_a_contradiction_is_the_candidates_error(self, hierarchy, a_contradicted, b_contradicted):
-        """Under a ground truth the side at fault is the one doing the
-        contradicting, never the ground truth; without one it is a conflict."""
-        p = _pipeline(hierarchy=hierarchy)
-        assert p._VARIANCE_LABELS["a_contradicted"] == a_contradicted
-        assert p._VARIANCE_LABELS["b_contradicted"] == b_contradicted
+    def test_overlap_has_no_direction_of_its_own(self, pipeline):
+        assert "a_in_b" not in pipeline._METRIC_DIRECTIONS
+        assert "b_in_a" not in pipeline._METRIC_DIRECTIONS
 
-    def test_the_numbers_never_change(self):
-        runs = [_pipeline(hierarchy=h)._build_run([_checked_item()]) for h in (None, "a", "b")]
-        assert runs[0]["metrics"] == runs[1]["metrics"] == runs[2]["metrics"]
-        assert runs[0]["items"] == runs[1]["items"] == runs[2]["items"]
-
-    def test_overlap_has_a_direction_only_under_a_hierarchy(self):
-        assert "a_in_b" not in _pipeline()._METRIC_DIRECTIONS
-        assert _pipeline(hierarchy="a")._METRIC_DIRECTIONS["a_in_b"] == "higher is better"
-
-    def test_variance_groups_match_the_metrics_tree(self, caplog):
-        p = _pipeline(hierarchy="a")
-        p.last_run = p._build_run([_checked_item()])
+    def test_variance_groups_match_the_metrics_tree(self, caplog, pipeline):
+        pipeline.last_run = pipeline._build_run([_checked_item()])
         with caplog.at_level(logging.INFO):
-            p._log_metrics()
-        for group, keys in p._VARIANCE_SECTIONS["metrics"]:
+            pipeline._log_metrics()
+        for group, keys in pipeline._VARIANCE_SECTIONS["metrics"]:
             assert f"{group} — its claims" in caplog.text
             for key in keys:
-                assert f"{p._VARIANCE_LABELS[key]}:" in caplog.text
-        assert "A (ground truth) — its claims checked against the text of B" in caplog.text
+                assert f"{pipeline._VARIANCE_LABELS[key]}:" in caplog.text
+        assert "A — its claims checked against the text of B" in caplog.text
 
 
 # ── ragcheck's generator half is compare ─────────────────────────────────────
@@ -288,7 +262,7 @@ class TestRagcheckEquivalence:
             A_KG: [_triplet(f"g{i}", b2a=v) for i, v in enumerate(self.VERDICTS_GT)],
             B_KG: [_triplet(f"r{i}", a2b=v) for i, v in enumerate(self.VERDICTS_RESPONSE)],
         }
-        return _pipeline(hierarchy="a")._build_run([item])["items"][0]
+        return _pipeline()._build_run([item])["items"][0]
 
     def test_precision_and_recall_match(self):
         rag, cmp = self._ragcheck_entry()["metrics"], self._compare_entry()["metrics"]

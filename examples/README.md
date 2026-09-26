@@ -6,10 +6,12 @@ named after the command it feeds, so the directory tells you what to run.
 Outputs land in a `results/` folder next to the input. `results/**` is untracked,
 so running these never dirties your checkout.
 
-All five files carry the same eight items about the exoplanet Kepler-22b, with
-byte-identical responses. Only the *fields around them* grow. That is the
-point of the walkthrough: each step needs strictly more data than the last, and
-you can see exactly what each new field buys you.
+The five files of steps 01–05 carry the same eight items about the exoplanet
+Kepler-22b, with byte-identical responses. Only the *fields around them* grow.
+That is the point of the walkthrough: each step needs strictly more data than
+the last, and you can see exactly what each new field buys you. Step 06 is its
+own use case: `compare` needs no reference, just two texts, each checked
+against the other.
 
 ## The journey
 
@@ -20,6 +22,7 @@ you can see exactly what each new field buys you.
 | 03 | `refcheck/` | `refcheck` | `response`, `reference` | **models** `--extractor-model`, `--checker-model` *(both required)*<br>**endpoints** `--extractor-base-api`, `--checker-base-api` |
 | 04 | `faithcheck/` | `faithcheck` | `response`, `retrieved_context` | **models** `--extractor-model`, `--checker-model` *(both required)*<br>**endpoints** `--extractor-base-api`, `--checker-base-api` |
 | 05 | `ragcheck/` | `ragcheck` | `response`, `retrieved_context`, `gt_answer` | **models** `--extractor-model`, `--checker-model` *(both required)*<br>**endpoints** `--extractor-base-api`, `--checker-base-api` |
+| 06 | `compare/` | `compare` | two texts, `a` and `b`<br>(`id` optional) | **models** `--extractor-model`, `--checker-model` *(both required)*<br>**endpoints** `--extractor-base-api`, `--checker-base-api` |
 
 Every command also accepts `--output`/`-o`, `--concurrency`, and `--debug`.
 Model flags have short aliases (`--model`, `-m`, `-e`, `-c`), but the long names
@@ -138,6 +141,33 @@ exercised. Read those two metrics accordingly:
   text actually support the ground truth?"
 - `context_precision` flattens, because every chunk is nominally in play for
   every question. Ignore it here.
+
+## 06 · compare — `compare/kepler22b.json`
+
+Not the next rung of the walkthrough but its own use case: two texts, compared
+claim by claim in both directions. A's claims are checked against B's text and
+B's claims against A's. No claim is ever matched to another claim — a claim is
+only ever checked against the other text.
+
+**Needed fields: `a` and `b`.** `id` is optional; it names the pair in the
+report.
+
+```bash
+claimlens compare examples/compare/kepler22b.json \
+  --extractor-model <your-model> \
+  --checker-model <your-model>
+```
+
+The file is one pair: two answers about Kepler-22b. They overlap on the
+habitable zone, the host star and the 290-day year, each has facts the other
+lacks, and they disagree on the radius — A says 2.1 times Earth's, B says 2.4.
+Expect that pair back as a **Contradiction** in both directions.
+
+The numbers are neutral: how much of A is in B, how much of B is in A, and
+where the two conflict. If one text is your ground truth, the HTML report
+reads them for you: switch it to "A is ground truth" and `a_in_b` becomes
+**recall**, `b_in_a` **precision**, and every contradiction is charged to the
+other text.
 
 ---
 
