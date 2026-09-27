@@ -51,7 +51,30 @@ Conventions:
 | --- | --- |
 | `{namespace}_verdict: "Entailment"\|"Contradiction"\|"Neutral"` | Normal verdict (+ `{namespace}_explanation`) |
 | `{namespace}_verdict: null` + `{namespace}_error: <cause>` | The check itself failed — same three causes. |
-| Matrix directions | `{namespace}_verdicts: {doc_id: verdict}` + `{namespace}_errors: {doc_id: cause}` (only non-null causes) |
+| `{namespace}_retry: <n>` (sparse) | The verdict came from retry round *n*, not the first pass. Absent = first pass. Never on a null verdict. |
+| Matrix directions | `{namespace}_verdicts: {doc_id: verdict}` + `{namespace}_errors: {doc_id: cause}` (only non-null causes) + `{namespace}_retries: {doc_id: n}` (only retried cells) |
+
+A first-pass verdict and a retried one are not measured under the same
+condition. The first pass runs the standard prompt at temperature 0.0; a
+parse failure is re-sent in rounds:
+
+| `retry` | Prompt | Temperature |
+| --- | --- | --- |
+| absent | standard | 0.0 |
+| `1` | standard | 0.3 |
+| `2` | plain | 0.5 |
+
+`n` is both the round and the number of retries it took (round 2 is only
+reached when round 1 failed). Every report writes the rounds it ran as
+`_meta.retry_rounds` (entry `n-1` is round `n`), so a file stays readable
+when the defaults change. Report cells and the findings entries that quote
+a verdict carry it as `"retry"`; faithcheck's `ungrounded` findings, which
+no single verdict decides, name the retried chunks as `"retries": {doc_id: n}`.
+Re-judging a claim clears its marker.
+
+`_meta.retry_rounds` describes the rounds of all three workers (extractor,
+checker, atomizer), but the marker is so far written on checker verdicts
+only — extractions carry no retry marker yet.
 
 ## The consumption rule (metrics, evals, skip logic)
 

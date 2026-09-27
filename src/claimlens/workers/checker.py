@@ -73,11 +73,13 @@ class ClaimVerdict:
     ``error`` carries WHY the verdict is None ("context_too_long" |
     "finish_reason_length" | "content_policy" | "timeout" | "parse_failure")
     so a null verdict is never
-    left open to interpretation downstream.
+    left open to interpretation downstream. ``retry`` is the retry round
+    (1-based) that produced the verdict; None when the first pass did.
     """
     verdict: Verdict | None
     explanation: str | None = None
     error: str | None = None
+    retry: int | None = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -304,6 +306,7 @@ class Checker:
                     results[original_idx] = ClaimVerdict(
                         verdict=parsed.verdict,
                         explanation=parsed.explanation,
+                        retry=round_num + 1,
                     )
                     round_result.recovered += 1
                     stats.success += 1
@@ -536,6 +539,7 @@ class Checker:
                             chunk_result[item.claim_id] = ClaimVerdict(
                                 verdict=item.verdict,
                                 explanation=item.explanation,
+                                retry=round_num + 1,
                             )
                             stats.success += 1
                             stats.total_items += 1

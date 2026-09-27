@@ -261,3 +261,39 @@ class TestFacade:
 
         assert entry["is_abstention"] is True
         assert entry["metrics"]["faithfulness"] is None
+
+# ── Retry marker ─────────────────────────────────────────────────────────────
+
+class TestRetryMarker:
+
+    def test_matrix_cells_carry_the_round_sparsely(self, pipeline):
+        item = _checked_item()
+        item[RESPONSE_KG][1][f"{NAMESPACE}_retries"] = {1: 2}
+        entry = pipeline._build_run([item])["items"][0]
+        assert entry["retrieved2response"][1][1]["retry"] == 2
+        assert "retry" not in entry["retrieved2response"][1][0]
+
+    def test_meta_names_the_rounds(self, pipeline):
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        run = pipeline._build_run([_checked_item()])
+        assert run["_meta"]["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)
+
+    def test_contradicted_carries_its_cells_round(self, pipeline):
+        item = _checked_item()
+        item[RESPONSE_KG][1][f"{NAMESPACE}_verdicts"] = {0: "Contradiction", 1: "Neutral"}
+        item[RESPONSE_KG][1][f"{NAMESPACE}_retries"] = {0: 1}
+        f = pipeline._build_findings(pipeline._build_run([item])["items"])
+        assert f["contradicted"][0]["retry"] == 1
+
+    def test_ungrounded_maps_retried_chunks_by_doc_id(self, pipeline):
+        """No single verdict decides 'ungrounded' — every chunk said Neutral —
+        so the retried cells are named per chunk, like undecidable's map."""
+        item = _checked_item()
+        item[RESPONSE_KG][1][f"{NAMESPACE}_retries"] = {1: 2}
+        f = pipeline._build_findings(pipeline._build_run([item])["items"])
+        assert f["ungrounded"][0]["retries"] == {"001": 2}
+
+    def test_ungrounded_without_retries_has_no_map(self, pipeline):
+        f = pipeline._build_findings(pipeline._build_run([_checked_item()])["items"])
+        assert "retries" not in f["ungrounded"][0]

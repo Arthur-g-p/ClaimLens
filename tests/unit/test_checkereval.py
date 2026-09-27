@@ -395,6 +395,7 @@ def _items_evaluator() -> CheckerEvaluator:
     ev._verdict_key = "gpt4o_checker_verdict"
     ev._explanation_key = "gpt4o_checker_explanation"
     ev._error_key = "gpt4o_checker_error"
+    ev._retry_key = "gpt4o_checker_retry"
     return ev
 
 
@@ -527,6 +528,9 @@ class TestRunDocuments:
         assert list(run_findings) == ["_meta", "findings"]
         meta = run_doc["_meta"]
         assert meta["report_type"] == "checker_eval"
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        assert meta["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)
         assert (meta["total_items"], meta["evaluated_items"], meta["dropped_items"]) == (3, 2, 1)
         assert run_doc["metrics"]["accuracy"] == round(2 / 3, 4)
         assert set(run_doc["metrics"]) == {
@@ -557,6 +561,7 @@ class TestRunDocuments:
         ev._verdict_key = "gpt4o_checker_verdict"
         ev._explanation_key = "gpt4o_checker_explanation"
         ev._error_key = "gpt4o_checker_error"
+        ev._retry_key = "gpt4o_checker_retry"
 
         async def fake_run(items):
             verdicts = iter(["Entailment", "Neutral", "Contradiction"])
@@ -593,3 +598,36 @@ class TestRunDocuments:
             "explanation": "because",
         }]
         assert findings["runs"][0]["findings"]["unjudged"] == []
+
+
+# ── Retry marker ─────────────────────────────────────────────────────────────
+
+class TestRetryMarker:
+
+    def _items_in(self):
+        return [{
+            "id": "x1", "question": "q", "response": "r",
+            "_gt_eval_response_kg": [
+                {"subject": "a", "predicate": "b", "object": "c",
+                 "gpt4o_checker_verdict": "Neutral",
+                 "gpt4o_checker_explanation": "no passage says so",
+                 "gpt4o_checker_retry": 2},
+                {"subject": "d", "predicate": "e", "object": "f",
+                 "gpt4o_checker_verdict": "Neutral"},
+            ],
+        }]
+
+    def test_claims_carry_the_round_sparsely(self):
+        ev = _items_evaluator()
+        claims = ev._build_items(self._items_in(), {0: {0: "Entailment", 1: "Neutral"}})[0]["claims"]
+        assert claims[0]["retry"] == 2
+        assert "retry" not in claims[1]
+
+    def test_wrong_verdict_names_its_round(self):
+        """The finding a reviewer reads to decide whether the checker or the
+        fallback condition erred."""
+        ev = _items_evaluator()
+        items = ev._build_items(self._items_in(), {0: {0: "Entailment", 1: "Entailment"}})
+        wrong = ev._build_findings(items)["wrong"]
+        assert wrong[0]["retry"] == 2
+        assert "retry" not in wrong[1]

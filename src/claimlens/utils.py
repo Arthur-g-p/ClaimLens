@@ -156,6 +156,20 @@ def findings_view(branches: list[str], items: list[dict], classify) -> dict:
             out[branch].append(entry)
     return out
 
+
+def describe_retry_rounds(rounds) -> list[dict]:
+    """``_meta.retry_rounds``: what a ``retry: n`` marker on a verdict meant
+    (entry n-1). Callers pass DEFAULT_RETRY_ROUNDS; no service passes its
+    own rounds, so that is what every worker in a report ran —
+    test_retry_marker pins that."""
+    return [{"prompt": r.prompt, "temperature": r.temperature} for r in rounds]
+
+
+def retry_of(cell: dict) -> dict:
+    """``{"retry": n}`` when *cell*'s verdict came from retry round n, else
+    ``{}`` — spread into a findings entry so the marker stays sparse."""
+    return {"retry": cell["retry"]} if cell.get("retry") else {}
+
 def plural(n: int, word: str, plural_form: str | None = None) -> str:
     """The noun for *n*: ``plural(1, "item")`` → ``item``, ``plural(2, "item")``
     → ``items``. Log lines only — JSON keys never change number."""

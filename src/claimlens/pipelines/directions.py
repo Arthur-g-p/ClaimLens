@@ -21,7 +21,8 @@ How verdicts land on the source items:
   otherwise. Afterwards the per-chunk results are folded back onto the
   original triplets as {chunk_index: ...} dicts under "{namespace}_verdicts"
   and "{namespace}_explanations" (plus "{namespace}_errors" for
-  null-verdict causes). Keyed by position, not doc_id: a corpus chunked from
+  null-verdict causes and "{namespace}_retries" for verdicts from a retry
+  round, both sparse). Keyed by position, not doc_id: a corpus chunked from
   one document repeats the same doc_id across its chunks, which would collapse
   every cell in the row onto the last one checked.
 """
@@ -125,6 +126,9 @@ def _flat_cell(triplet: dict, namespace: str) -> dict:
     error = triplet.get(f"{namespace}_error")
     if error:
         cell["error"] = error
+    retry = triplet.get(f"{namespace}_retry")
+    if retry:
+        cell["retry"] = retry
     return cell
 
 
@@ -313,6 +317,7 @@ async def _run_matrix(
     matrix_verdict_key = checking.verdict_key + "s"
     matrix_explanation_key = checking.explanation_key + "s"
     matrix_error_key = checking.checker_error_key + "s"
+    matrix_retry_key = checking.checker_retry_key[:-1] + "ies"  # _retry → _retries
     for item, chunk_idx, copies in bookkeeping:
         originals = item.get(direction.kg_key) or []
         for original, copied in zip(originals, copies):
@@ -325,6 +330,17 @@ async def _run_matrix(
             error = copied.get(checking.checker_error_key)
             if error:
                 original.setdefault(matrix_error_key, {})[chunk_idx] = error
+            # This cell was just judged: a round left from an earlier
+            # judgement must not survive it.
+            retries = original.get(matrix_retry_key, {})
+            retries.pop(chunk_idx, None)
+            retry = copied.get(checking.checker_retry_key)
+            if retry:
+                retries[chunk_idx] = retry
+            if retries:
+                original[matrix_retry_key] = retries
+            else:
+                original.pop(matrix_retry_key, None)
 
 
 async def _run_service(

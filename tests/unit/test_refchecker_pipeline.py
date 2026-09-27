@@ -274,3 +274,33 @@ class TestEnvelopeInput:
         p = _running_pipeline()
         with pytest.raises(InvalidInputError):
             p.run_sync({"items": [_item()]})
+
+
+# ── Retry marker ─────────────────────────────────────────────────────────────
+
+class TestRetryMarker:
+
+    def _item(self):
+        return {**_item(), "question": "q", KG_KEY: [
+            {"subject": "s", "predicate": "p", "object": "o",
+             VERDICT_KEY: "Neutral", f"{CHECKER}_checker_explanation": "e",
+             f"{CHECKER}_checker_retry": 2},
+            {"subject": "s", "predicate": "q", "object": "o", VERDICT_KEY: "Entailment"},
+        ]}
+
+    def test_claims_carry_the_round_sparsely(self):
+        claims = _pipeline()._build_item(self._item(), 0)["claims"]
+        assert claims[0]["retry"] == 2
+        assert "retry" not in claims[1]
+
+    def test_findings_carry_the_round(self):
+        items = [_pipeline()._build_item(self._item(), 0)]
+        f = RefCheckerPipeline._build_findings(items)
+        assert f["unsupported"][0]["retry"] == 2
+
+    def test_meta_names_the_rounds(self):
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        p = _running_pipeline()
+        p.run_sync([_item()])
+        assert p.last_report["_meta"]["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)

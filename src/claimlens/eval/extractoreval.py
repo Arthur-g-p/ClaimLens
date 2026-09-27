@@ -20,7 +20,7 @@ from datetime import datetime
 
 from claimlens import settings
 from claimlens.exceptions import InvalidInputError
-from claimlens.models import ExtractorEvalResult
+from claimlens.models import DEFAULT_RETRY_ROUNDS, ExtractorEvalResult
 from claimlens.stats import (
     GLOBAL_STATS,
     usage_since,
@@ -32,8 +32,10 @@ from claimlens.utils import (
     plural,
     build_meta,
     canonicalize_triplets,
+    describe_retry_rounds,
     find_duplicate_triplets,
     findings_view,
+    retry_of,
 )
 from claimlens.eval.base import Evaluator
 from claimlens.services.base import BaseService
@@ -342,6 +344,7 @@ class ExtractorEvaluator(Evaluator):
             pred_key=self._pred_key,
             matching="llm-2-pass",
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         metrics = {
@@ -844,6 +847,8 @@ class ExtractorEvaluator(Evaluator):
         service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
         verdict_key = f"{self._checker_model}_checker_verdict"
         explanation_key = f"{self._checker_model}_checker_explanation"
+        error_key = f"{self._checker_model}_checker_error"
+        retry_key = f"{self._checker_model}_checker_retry"
 
         results = []
         for i, item in enumerate(valid_items):
@@ -873,10 +878,17 @@ class ExtractorEvaluator(Evaluator):
             # FN/FP derive from the judged misses alone — unjudged claims
             # (checker failure) leave numerator and denominator entirely.
             def judged(checked: list[dict], originals: list[dict]) -> list[dict]:
-                return [{"claim": self._triplet_to_str(o),
-                         "verdict": t.get(verdict_key),
-                         "explanation": t.get(explanation_key)}
-                        for t, o in zip(checked, originals)]
+                claims = []
+                for t, o in zip(checked, originals):
+                    claim = {"claim": self._triplet_to_str(o),
+                             "verdict": t.get(verdict_key),
+                             "explanation": t.get(explanation_key)}
+                    if t.get(error_key):
+                        claim["error"] = t[error_key]
+                    if t.get(retry_key):
+                        claim["retry"] = t[retry_key]
+                    claims.append(claim)
+                return claims
 
             results.append(_ItemMatchResult(
                 tp_recall=tp_from_recall,
@@ -1072,12 +1084,12 @@ class ExtractorEvaluator(Evaluator):
                                         ("pred", "pred_claims", "unsupported")):
                     for c in item[key]:
                         if c["verdict"] is None:
-                            yield "unjudged", {**head, "claim": c["claim"],
-                                               "side": side, "cause": "checker_failure"}
+                            yield "unjudged", {**head, "claim": c["claim"], "side": side,
+                                               "cause": c.get("error", "checker_failure")}
                         elif c["verdict"] != "Entailment":
                             yield miss, {**head, "claim": c["claim"],
                                          "verdict": c["verdict"],
-                                         "explanation": c["explanation"]}
+                                         "explanation": c["explanation"], **retry_of(c)}
             elif bucket == "answer_missed":
                 yield "answer_missed", {**head, "response": item["response"],
                                         "claims": [c["claim"] for c in item["gt_claims"]]}

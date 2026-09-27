@@ -171,6 +171,7 @@ class CheckingService(BaseService):
         self._verdict_key = f"{namespace}_verdict"
         self._explanation_key = f"{namespace}_explanation"
         self._checker_error_key = f"{namespace}_error"
+        self._checker_retry_key = f"{namespace}_retry"
         self._checker = Checker(
             api_key=api_key,
             model=model,
@@ -196,6 +197,10 @@ class CheckingService(BaseService):
     @property
     def checker_error_key(self) -> str:
         return self._checker_error_key
+
+    @property
+    def checker_retry_key(self) -> str:
+        return self._checker_retry_key
 
     @property
     def extraction_error_key(self) -> str:
@@ -544,6 +549,7 @@ class CheckingService(BaseService):
         Each triplet gets:
         - ``{model}_checker_verdict``: "Entailment" | "Contradiction" | "Neutral" | None
         - ``{model}_checker_explanation``: chain-of-thought reasoning | None
+        - ``{model}_checker_retry`` (sparse): the retry round that produced it
 
         Triplets absent from verdicts_map (already checked in a prior run)
         are left untouched.
@@ -555,11 +561,14 @@ class CheckingService(BaseService):
                     continue
                 cv = item_verdicts[claim_idx]
                 triplet.pop(self._checker_error_key, None)
+                triplet.pop(self._checker_retry_key, None)
                 triplet[self._verdict_key] = cv.verdict.value if cv.verdict else None
                 triplet[self._explanation_key] = cv.explanation
                 # Null verdict is never left uninterpretable: persist WHY
                 if cv.verdict is None and cv.error:
                     triplet[self._checker_error_key] = cv.error
+                if cv.retry:
+                    triplet[self._checker_retry_key] = cv.retry
 
     # ── Logging (service-owned sections) ─────────────────────────
 

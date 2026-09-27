@@ -28,6 +28,7 @@ class FakeCheckingService:
         self.verdict_key = f"{NAMESPACE}_verdict"
         self.explanation_key = f"{NAMESPACE}_explanation"
         self.checker_error_key = f"{NAMESPACE}_error"
+        self.checker_retry_key = f"{NAMESPACE}_retry"
         self.extraction_error_key = "ext_extraction_error"
         self._verdict = verdict
         self._raise = raise_filter_error

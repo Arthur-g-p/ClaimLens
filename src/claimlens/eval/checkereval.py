@@ -21,7 +21,7 @@ from claimlens.eval.metrics import (
     classification_report,
     confusion_matrix,
 )
-from claimlens.models import CheckerEvalResult
+from claimlens.models import DEFAULT_RETRY_ROUNDS, CheckerEvalResult
 from claimlens.stats import (
     GLOBAL_STATS,
     usage_since,
@@ -29,7 +29,9 @@ from claimlens.stats import (
     log_mece_tree,
     log_rate_rows,
 )
-from claimlens.utils import build_meta, canonicalize_triplets, findings_view, plural
+from claimlens.utils import (
+    build_meta, canonicalize_triplets, describe_retry_rounds, findings_view, plural, retry_of,
+)
 from claimlens.eval.base import Evaluator
 from claimlens.services.base import BaseService
 from claimlens.services.checking import CheckingService
@@ -108,6 +110,7 @@ class CheckerEvaluator(Evaluator):
         self._verdict_key = f"{checker_model}_checker_verdict"
         self._explanation_key = f"{checker_model}_checker_explanation"
         self._error_key = f"{checker_model}_checker_error"
+        self._retry_key = f"{checker_model}_checker_retry"
 
         # The service owns all checking logic. compact verbosity keeps its
         # per-phase API/BL blocks but leaves the pre-exec sections and the
@@ -211,6 +214,7 @@ class CheckerEvaluator(Evaluator):
             evaluated_items=result.total_items,
             dropped_items=sk["missing_gt"] + sk["missing_context"] + sk["empty_gt"],
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         items = self._build_items(evaluable, gt_labels_map)
@@ -501,6 +505,8 @@ class CheckerEvaluator(Evaluator):
                 }
                 if entry["verdict"] is None:
                     entry["error"] = triplet.get(self._error_key, "checker_failure")
+                if triplet.get(self._retry_key):
+                    entry["retry"] = triplet[self._retry_key]
                 claims.append(entry)
             items.append({
                 "id": item.get("id", f"item-{i}"),
@@ -526,7 +532,7 @@ class CheckerEvaluator(Evaluator):
                     yield "unjudged", {**base, "cause": c.get("error")}
                 elif c["verdict"] != c["human_label"]:
                     yield "wrong", {**base, "verdict": c["verdict"],
-                                    "explanation": c["explanation"]}
+                                    "explanation": c["explanation"], **retry_of(c)}
 
         return findings_view(["wrong", "unjudged"], items, classify)
 

@@ -26,7 +26,7 @@ from datetime import datetime
 
 from claimlens import settings
 from claimlens.exceptions import InvalidInputError
-from claimlens.models import Direction
+from claimlens.models import DEFAULT_RETRY_ROUNDS, Direction
 from claimlens.services.base import BaseService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.checking import CheckingService
@@ -46,7 +46,7 @@ from claimlens.pipelines.directions import (
     unwrap_items,
 )
 from claimlens.stats import GLOBAL_STATS, format_headline, log_mece_tree, log_rate_rows, log_token_stats, usage_since
-from claimlens.utils import build_meta, findings_view, plural
+from claimlens.utils import build_meta, describe_retry_rounds, findings_view, plural, retry_of
 
 logger = settings.get_logger(__name__)
 
@@ -561,11 +561,13 @@ class RagCheckerPipeline(BaseService):
                     triplet[a2r.verdict_key] = "Neutral"
                     triplet[a2r.explanation_key] = (
                         "no ground-truth answer exists — not sent to the checker")
+                    triplet.pop(a2r.checker_retry_key, None)
             if item.get("response", "").strip() == "":
                 for triplet in item.get(self._gt_kg) or []:
                     triplet[r2a.verdict_key] = "Neutral"
                     triplet[r2a.explanation_key] = (
                         "empty response entails nothing — not sent to the checker")
+                    triplet.pop(r2a.checker_retry_key, None)
 
     # _run_repeated inherited from BaseService (variance mode)
 
@@ -638,6 +640,7 @@ class RagCheckerPipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         counts = compute_overall_counts(items)
@@ -725,7 +728,7 @@ class RagCheckerPipeline(BaseService):
                                   else "noise_sensitivity_in_irrelevant")
                         yield branch, {**entry, "gt_verdict": a2r["verdict"],
                                        "explanation": a2r.get("explanation"),
-                                       "grounded_by": grounded_by}
+                                       **retry_of(a2r), "grounded_by": grounded_by}
                 elif None in verdicts:
                     yield "unjudged", {**entry, "direction": "retrieved2response",
                                        "cause": "checker_failure"}
@@ -733,7 +736,8 @@ class RagCheckerPipeline(BaseService):
                     yield "self_knowledge", entry
                 else:
                     yield "hallucination", {**entry, "gt_verdict": a2r["verdict"],
-                                            "explanation": a2r.get("explanation")}
+                                            "explanation": a2r.get("explanation"),
+                                            **retry_of(a2r)}
 
             for gt_claim, r2a, row in zip(item["gt_answer_claims"],
                                           item["response2answer"],
@@ -744,7 +748,7 @@ class RagCheckerPipeline(BaseService):
                                        "cause": r2a.get("error", "checker_failure")}
                 elif r2a["verdict"] != _ENTAILMENT:
                     yield "recall_misses", {
-                        **entry, "explanation": r2a.get("explanation"),
+                        **entry, "explanation": r2a.get("explanation"), **retry_of(r2a),
                         "retrieved_in": [doc_ids[d] for d, c in enumerate(row)
                                          if c.get("verdict") == _ENTAILMENT]}
 
@@ -824,6 +828,7 @@ class RagCheckerPipeline(BaseService):
         verdicts = triplet.get(f"{namespace}_verdicts") or {}
         explanations = triplet.get(f"{namespace}_explanations") or {}
         errors = triplet.get(f"{namespace}_errors") or {}
+        retries = triplet.get(f"{namespace}_retries") or {}
         row = []
         for idx in range(n_chunks):
             cell = {
@@ -832,6 +837,8 @@ class RagCheckerPipeline(BaseService):
             }
             if errors.get(idx):
                 cell["error"] = errors[idx]
+            if retries.get(idx):
+                cell["retry"] = retries[idx]
             row.append(cell)
         return row
 

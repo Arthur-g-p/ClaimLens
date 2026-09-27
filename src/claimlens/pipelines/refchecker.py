@@ -20,6 +20,7 @@ from datetime import datetime
 
 from claimlens import settings
 from claimlens.exceptions import InvalidInputError
+from claimlens.models import DEFAULT_RETRY_ROUNDS
 from claimlens.pipelines.directions import (
     _location,
     log_pipeline_tree,
@@ -31,7 +32,7 @@ from claimlens.services.base import BaseService
 from claimlens.services.checking import CheckingService
 from claimlens.services.extraction import ExtractionService
 from claimlens.stats import GLOBAL_STATS, log_token_stats, usage_since
-from claimlens.utils import build_meta, findings_view, plural
+from claimlens.utils import build_meta, describe_retry_rounds, findings_view, plural, retry_of
 
 logger = settings.get_logger(__name__)
 
@@ -83,6 +84,7 @@ class RefCheckerPipeline(BaseService):
         self._verdict_key = f"{namespace}_verdict"
         self._explanation_key = f"{namespace}_explanation"
         self._checker_error_key = f"{namespace}_error"
+        self._checker_retry_key = f"{namespace}_retry"
 
         # Compose the two services. Each fail-fasts on its own API key here.
         self._extraction = ExtractionService(
@@ -211,6 +213,7 @@ class RefCheckerPipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         checking = self._verdict_counts(items)
@@ -238,6 +241,8 @@ class RefCheckerPipeline(BaseService):
             }
             if triplet.get(self._checker_error_key):
                 claim["error"] = triplet[self._checker_error_key]
+            if triplet.get(self._checker_retry_key):
+                claim["retry"] = triplet[self._checker_retry_key]
             claims.append(claim)
         entry = {
             "id": str(item.get("id", index)),
@@ -296,9 +301,9 @@ class RefCheckerPipeline(BaseService):
                 if c["verdict"] is None:
                     yield "unjudged", {**entry, "cause": c.get("error", "checker_failure")}
                 elif c["verdict"] == "Contradiction":
-                    yield "contradicted", {**entry, "explanation": c["explanation"]}
+                    yield "contradicted", {**entry, "explanation": c["explanation"], **retry_of(c)}
                 elif c["verdict"] == "Neutral":
-                    yield "unsupported", {**entry, "explanation": c["explanation"]}
+                    yield "unsupported", {**entry, "explanation": c["explanation"], **retry_of(c)}
 
         return findings_view(
             ["unsupported", "contradicted", "unjudged", "abstained", "extraction_failed"],

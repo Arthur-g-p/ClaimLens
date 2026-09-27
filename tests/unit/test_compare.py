@@ -277,3 +277,32 @@ class TestRagcheckEquivalence:
 
         assert verdicts(cmp["a2b"]) == verdicts(rag["answer2response"])
         assert verdicts(cmp["b2a"]) == verdicts(rag["response2answer"])
+
+
+# ── Retry marker ─────────────────────────────────────────────────────────────
+
+class TestRetryMarker:
+
+    def _item(self):
+        item = _checked_item()
+        item[A_KG][1][f"{CHK}_b2a_retry"] = 2      # "flowing north", Neutral
+        item[B_KG][1][f"{CHK}_a2b_retry"] = 1      # "7,000 km long", Contradiction
+        return item
+
+    def test_cells_carry_the_round_sparsely(self, pipeline):
+        entry = pipeline._build_run([self._item()])["items"][0]
+        assert entry["b2a"][1]["retry"] == 2
+        assert entry["a2b"][1]["retry"] == 1
+        assert "retry" not in entry["b2a"][0]
+
+    def test_meta_names_the_rounds(self, pipeline):
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        run = pipeline._build_run([self._item()])
+        assert run["_meta"]["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)
+
+    def test_findings_carry_the_round(self, pipeline):
+        f = pipeline._build_findings(pipeline._build_run([self._item()])["items"])
+        assert f["a_not_in_b"][0]["retry"] == 2
+        assert f["b_contradicted"][0]["retry"] == 1
+        assert "retry" not in f["a_contradicted"][0]

@@ -190,7 +190,8 @@ model-namespaced keys:
   key such as `{extractor_model}_gt_answer_kg`): a list of
   `{subject, predicate, object}` triplet dicts.
 - Checking writes onto each triplet: `{namespace}_verdict`,
-  `{namespace}_explanation`, `{namespace}_error` (null-verdict cause), where
+  `{namespace}_explanation`, `{namespace}_error` (null-verdict cause),
+  `{namespace}_retry` (sparse: the retry round that produced the verdict), where
   the default namespace is `{checker_model}_checker` and pipelines use
   direction namespaces like `{checker_model}_answer2response`.
 - Triplets accumulate enrichment keys over time (`human_label`, `atomized`,

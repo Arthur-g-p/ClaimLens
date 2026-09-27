@@ -741,3 +741,64 @@ class TestFindings:
         assert f["unwarranted_answer"][0]["claims"] == [
             "k has rocky surface", "k has two moons", "k is an exoplanet"]
         assert f["hallucination"] == [] and f["recall_misses"] == []
+
+
+# ── Retry marker: which verdicts came out of a retry round ──────────────────
+
+class TestRetryMarker:
+
+    def _item(self):
+        item = _checked_item()
+        claim = item[RESPONSE_KG][0]
+        claim[f"{CHK}_answer2response_verdict"] = "Neutral"
+        claim[f"{CHK}_answer2response_retry"] = 2
+        claim[f"{CHK}_retrieved2response_verdicts"] = {0: "Neutral", 1: "Neutral"}
+        claim[f"{CHK}_retrieved2response_retries"] = {1: 1}
+        gt_claim = item[GT_KG][0]
+        gt_claim[f"{CHK}_response2answer_verdict"] = "Neutral"
+        gt_claim[f"{CHK}_response2answer_retry"] = 1
+        return item
+
+    def test_cells_carry_the_round_sparsely(self, pipeline):
+        entry = pipeline._build_run([self._item()])["items"][0]
+        assert entry["answer2response"][0]["retry"] == 2
+        assert entry["response2answer"][0]["retry"] == 1
+        assert entry["retrieved2response"][0][1]["retry"] == 1
+        assert "retry" not in entry["retrieved2response"][0][0]
+        assert "retry" not in entry["retrieved2answer"][0][0]
+
+    def test_meta_names_the_rounds(self, pipeline):
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        run = pipeline._build_run([self._item()])
+        assert run["_meta"]["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)
+
+    def test_findings_carry_the_round_of_the_explained_verdict(self, pipeline):
+        f = RagCheckerPipeline._build_findings(pipeline._build_run([self._item()])["items"])
+        assert f["hallucination"][0]["retry"] == 2
+        assert f["recall_misses"][0]["retry"] == 1
+
+    def test_noise_sensitivity_carries_it_too(self, pipeline):
+        item = self._item()
+        item[RESPONSE_KG][0][f"{CHK}_retrieved2response_verdicts"] = {0: "Entailment", 1: "Neutral"}
+        f = RagCheckerPipeline._build_findings(pipeline._build_run([item])["items"])
+        noise = f["noise_sensitivity_in_relevant"] + f["noise_sensitivity_in_irrelevant"]
+        assert noise[0]["retry"] == 2
+
+    def test_prefilled_verdict_clears_a_stale_marker(self, pipeline):
+        """A prefilled verdict never went to the checker, so a round left on
+        the triplet from an earlier judgement would be a false claim."""
+        blank_gt = _full_item(gt_answer="", **{
+            RESPONSE_KG: [{"subject": "a", "predicate": "b", "object": "c",
+                           f"{CHK}_answer2response_retry": 2}],
+            GT_KG: [],
+        })
+        pipeline._validate([blank_gt])
+        pipeline._prefill_known_verdicts([blank_gt])
+        assert f"{CHK}_answer2response_retry" not in blank_gt[RESPONSE_KG][0]
+
+    def test_first_pass_findings_have_no_key(self, pipeline):
+        item = self._item()
+        del item[RESPONSE_KG][0][f"{CHK}_answer2response_retry"]
+        f = RagCheckerPipeline._build_findings(pipeline._build_run([item])["items"])
+        assert "retry" not in f["hallucination"][0]

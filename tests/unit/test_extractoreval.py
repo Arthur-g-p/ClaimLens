@@ -613,6 +613,29 @@ class TestBuildResult:
         assert result.checker_failures["issued_verdicts"] == 7
 
 
+class TestRetryInFindings:
+
+    def test_unsupported_names_its_round(self):
+        ev = _evaluator()
+        item = _make_item(gt_triplets=[_make_canonical_triplet("a", "b", "c")],
+                          pred_triplets=[_make_canonical_triplet("x", "y", "z")],
+                          item_id="r1")
+        buckets = _ItemBucket(
+            to_compare=[item], abstention_misread=[],
+            answer_missed=[], abstention_recognized=[],
+        )
+        item_results = [_ItemMatchResult(
+            tp_recall=0, tp_precision=0, fp=1, fn=1,
+            false_positives=[], false_negatives=[],
+            gt_claims=[{"claim": "a b c", "verdict": "Neutral", "explanation": "e"}],
+            pred_claims=[{"claim": "x y z", "verdict": "Neutral", "explanation": "e",
+                          "retry": 1}],
+        )]
+        findings = ev._build_findings(ev._build_items(buckets, item_results))
+        assert findings["unsupported"][0]["retry"] == 1
+        assert "retry" not in findings["missed"][0]
+
+
 class TestUnjudgedInFindings:
     """Checker failures are not disagreements, but affected items must stay
     identifiable in the findings with their unjudged claims."""
@@ -656,6 +679,67 @@ class TestUnjudgedInFindings:
         items = ev._build_items(buckets, item_results)
         assert [i["bucket"] for i in items] == ["compared"]
         assert all(v == [] for v in ev._build_findings(items).values())
+
+    async def test_matching_keeps_the_checker_error_cause(self):
+        """The service persists why a verdict is null; the record must not
+        drop it (docs/outcome_markers.md: a null verdict is never opaque)."""
+        class FakeService:
+            def __init__(self, **kwargs):
+                pass
+
+            async def run(self, items):
+                for it in items:
+                    for t in it["_exteval_response_kg"]:
+                        if t["subject"] == "bad":
+                            t["test-checker_checker_verdict"] = None
+                            t["test-checker_checker_explanation"] = None
+                            t["test-checker_checker_error"] = "context_too_long"
+                        elif t["subject"] == "late":
+                            t["test-checker_checker_verdict"] = "Neutral"
+                            t["test-checker_checker_explanation"] = "e"
+                            t["test-checker_checker_retry"] = 2
+                        else:
+                            t["test-checker_checker_verdict"] = "Entailment"
+                            t["test-checker_checker_explanation"] = "e"
+                return items
+
+        ev = _evaluator()
+        item = _make_item(gt_triplets=[_make_canonical_triplet("a", "b", "c"),
+                                       _make_canonical_triplet("bad", "x", "y")],
+                          pred_triplets=[_make_canonical_triplet("a", "b", "c"),
+                                         _make_canonical_triplet("late", "x", "y")])
+        with patch("claimlens.eval.extractoreval.CheckingService", FakeService):
+            [result] = await ev._match_all_llm([item])
+        assert result.gt_claims == [
+            {"claim": "a b c", "verdict": "Entailment", "explanation": "e"},
+            {"claim": "bad x y", "verdict": None, "explanation": None,
+             "error": "context_too_long"},
+        ]
+        assert "error" not in result.pred_claims[0]
+        assert result.pred_claims[1]["retry"] == 2
+        assert "retry" not in result.pred_claims[0]
+
+    def test_unjudged_finding_names_the_real_cause(self):
+        ev = _evaluator()
+        item = _make_item(gt_triplets=[_make_canonical_triplet("a", "b", "c")],
+                          pred_triplets=[_make_canonical_triplet("a", "b", "c")],
+                          item_id="u2")
+        buckets = _ItemBucket(
+            to_compare=[item], abstention_misread=[],
+            answer_missed=[], abstention_recognized=[],
+        )
+        item_results = [_ItemMatchResult(
+            tp_recall=0, tp_precision=1, fp=0, fn=0,
+            false_positives=[], false_negatives=[],
+            unjudged_gt=[{"gt_triplet": "a b c", "cause": "checker_failure"}],
+            gt_claims=[{"claim": "a b c", "verdict": None, "explanation": None,
+                        "error": "context_too_long"}],
+            pred_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
+        )]
+        findings = ev._build_findings(ev._build_items(buckets, item_results))
+        assert findings["unjudged"] == [
+            {"id": "u2", "question": "q", "claim": "a b c", "side": "gt",
+             "cause": "context_too_long"}]
 
 
 
@@ -851,6 +935,9 @@ class TestEvaluateIntegration:
         assert record["metrics"]["recall"] == 1.0
         assert record["metrics"]["f1"] == 1.0
         assert record["_meta"]["report_type"] == "extractor_eval"
+        from claimlens.models import DEFAULT_RETRY_ROUNDS
+        from claimlens.utils import describe_retry_rounds
+        assert record["_meta"]["retry_rounds"] == describe_retry_rounds(DEFAULT_RETRY_ROUNDS)
         assert record["_meta"]["runs"] == 1 and len(record["runs"]) == 1
         run = record["runs"][0]
         assert list(run) == ["_meta", "metrics", "counts", "items"]

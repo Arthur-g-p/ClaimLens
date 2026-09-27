@@ -24,7 +24,7 @@ from datetime import datetime
 
 from claimlens import settings
 from claimlens.exceptions import InvalidInputError
-from claimlens.models import Direction
+from claimlens.models import DEFAULT_RETRY_ROUNDS, Direction
 from claimlens.services.base import BaseService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.checking import CheckingService
@@ -43,7 +43,7 @@ from claimlens.pipelines.directions import (
     unwrap_items,
 )
 from claimlens.stats import GLOBAL_STATS, format_headline, log_mece_tree, log_rate_rows, log_token_stats, usage_since
-from claimlens.utils import build_meta, findings_view, plural
+from claimlens.utils import build_meta, describe_retry_rounds, findings_view, plural, retry_of
 
 logger = settings.get_logger(__name__)
 
@@ -246,6 +246,7 @@ class FaithfulnessPipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         metrics, support = self._compute_metrics(items)
@@ -317,19 +318,23 @@ class FaithfulnessPipeline(BaseService):
                 if _ENTAILMENT in verdicts:
                     continue  # grounded — not a finding
                 text = f"{claim['subject']} {claim['predicate']} {claim['object']}"
-                contradictions = [(doc_ids[d], c.get("explanation"))
+                contradictions = [(doc_ids[d], c)
                                   for d, c in enumerate(row) if c.get("verdict") == "Contradiction"]
                 tally = {v: verdicts.count(v) for v in ("Neutral", "Contradiction") if verdicts.count(v)}
                 if contradictions:
-                    for doc_id, explanation in contradictions:
+                    for doc_id, cell in contradictions:
                         yield "contradicted", {**head, "claim": text, "doc_id": doc_id,
-                                               "explanation": explanation, "verdicts": tally}
+                                               "explanation": cell.get("explanation"),
+                                               **retry_of(cell), "verdicts": tally}
                 elif None in verdicts:
                     yield "undecidable", {**head, "claim": text, "verdicts": tally,
                                           "unjudged": {doc_ids[d]: c.get("error", "checker_failure")
                                                        for d, c in enumerate(row) if c.get("verdict") is None}}
                 else:
-                    yield "ungrounded", {**head, "claim": text, "chunks_checked": len(row)}
+                    # No single verdict decides it, so name every retried cell.
+                    retries = {doc_ids[d]: c["retry"] for d, c in enumerate(row) if c.get("retry")}
+                    yield "ungrounded", {**head, "claim": text, "chunks_checked": len(row),
+                                         **({"retries": retries} if retries else {})}
 
         return findings_view(
             ["ungrounded", "contradicted", "undecidable", "abstained", "extraction_failed"],
@@ -353,6 +358,7 @@ class FaithfulnessPipeline(BaseService):
             verdicts = triplet.get(f"{self._namespace}_verdicts") or {}
             explanations = triplet.get(f"{self._namespace}_explanations") or {}
             errors = triplet.get(f"{self._namespace}_errors") or {}
+            retries = triplet.get(f"{self._namespace}_retries") or {}
             row = []
             for idx in range(len(doc_ids)):
                 cell = {
@@ -361,6 +367,8 @@ class FaithfulnessPipeline(BaseService):
                 }
                 if errors.get(idx):
                     cell["error"] = errors[idx]
+                if retries.get(idx):
+                    cell["retry"] = retries[idx]
                 row.append(cell)
             matrix.append(row)
             claim_support.append(

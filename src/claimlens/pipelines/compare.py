@@ -23,7 +23,7 @@ from datetime import datetime
 
 from claimlens import settings
 from claimlens.exceptions import InvalidInputError
-from claimlens.models import Direction
+from claimlens.models import DEFAULT_RETRY_ROUNDS, Direction
 from claimlens.services.base import BaseService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.checking import CheckingService
@@ -41,7 +41,7 @@ from claimlens.pipelines.directions import (
     verdict_summary,
 )
 from claimlens.stats import GLOBAL_STATS, format_headline, log_rate_rows, log_token_stats, usage_since
-from claimlens.utils import build_meta, findings_view, plural
+from claimlens.utils import build_meta, describe_retry_rounds, findings_view, plural, retry_of
 
 logger = settings.get_logger(__name__)
 
@@ -341,6 +341,7 @@ class ComparePipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
+            retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
         counts = compute_overall_counts(items)
@@ -421,9 +422,11 @@ class ComparePipeline(BaseService):
                         yield "unjudged", {**entry, "side": side,
                                            "cause": cell.get("error", "checker_failure")}
                     elif verdict == _CONTRADICTION:
-                        yield f"{side}_contradicted", {**entry, "explanation": cell.get("explanation")}
+                        yield f"{side}_contradicted", {**entry, "explanation": cell.get("explanation"),
+                                                       **retry_of(cell)}
                     elif verdict != _ENTAILMENT:
-                        yield f"{side}_not_in_{other}", {**entry, "explanation": cell.get("explanation")}
+                        yield f"{side}_not_in_{other}", {**entry, "explanation": cell.get("explanation"),
+                                                         **retry_of(cell)}
 
         return findings_view(
             ["a_not_in_b", "a_contradicted", "b_not_in_a", "b_contradicted",
