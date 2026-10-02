@@ -386,6 +386,19 @@ class TestBuildResult:
         assert "Neutral" in result.report
         assert "macro avg" in result.report
 
+    @patch("claimlens.eval.checkereval.CheckingService")
+    def test_all_unjudged_is_null_not_zero(self, mock_svc_cls):
+        """Every claim unjudged: nothing was judged, so accuracy and macro
+        F1 are null, never 0.0."""
+        evaluator = CheckerEvaluator.__new__(CheckerEvaluator)
+        skip = {"missing_gt": 0, "missing_context": 0, "empty_gt": 0}
+
+        result = evaluator._build_result([], [], 3, 1, skip)
+
+        assert result.accuracy is None
+        assert result.macro_f1 is None
+        assert result.checker_failure_rate == 1.0
+
 
 # ── Test _build_items / _build_findings ─────────────────────────────────────
 

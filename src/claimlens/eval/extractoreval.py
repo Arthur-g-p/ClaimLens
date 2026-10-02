@@ -649,12 +649,12 @@ class ExtractorEvaluator(Evaluator):
         unjudged_gt = sum(len(ir.unjudged_gt) for ir in item_results)
         unjudged_pred = sum(len(ir.unjudged_pred) for ir in item_results)
 
-        # Unjustified abstention: every GT triplet is an uncovered GT claim (FN)
+        # Answer missed: every GT triplet is an uncovered GT claim (FN)
         abstention_fn_penalty = sum(
             len(item[self._gt_key]) for item in buckets.answer_missed
         )
 
-        # Unwarranted answer: every predicted triplet is an unsupported prediction (FP)
+        # Abstention misread: every predicted triplet is an unsupported prediction (FP)
         answer_fp_penalty = sum(
             len(item[self._pred_key]) for item in buckets.abstention_misread
         )

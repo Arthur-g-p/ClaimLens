@@ -79,7 +79,7 @@ data out) — there is deliberately no separate pipeline base class.
 Multi-run support (`_run_repeated`, the run line, the variance wiring)
 lives on `BaseService` because pipelines deliberately have no own base;
 bare services never trigger it. Pipelines
-talk to services only, never workers. Three exist:
+talk to services only, never workers. Four exist:
 
 - `RefCheckerPipeline` — extraction + checking, one document (the classic
   reference-checking use case).
@@ -87,6 +87,9 @@ talk to services only, never workers. Three exist:
   (see docs/ragchecker.md).
 - `FaithfulnessPipeline` — 1 extraction + 1 direction, no ground truth
   (see docs/faithfulness.md).
+- `ComparePipeline` — 2 extractions + 2 flat directions (`b2a`, `a2b`):
+  two texts, each text's claims checked against the other text, never
+  matched to its claims (see README.md).
 
 **Direction** (`models.Direction` + `pipelines/directions.py`): the unit of
 comparison in RAGChecker-style pipelines — *claims from one triplet list
@@ -142,8 +145,8 @@ writes both verbatim, adding `_args`. Children services run `compact` at
 
 ## Output documents (`schema_version` 5)
 
-`refcheck`, `ragcheck`, `faithcheck`, `eval checker` and `eval extractor`
-write the same two documents (`refcheck` has no aggregate, so its `metrics`
+`refcheck`, `ragcheck`, `faithcheck`, `compare`, `eval checker` and
+`eval extractor` write the same two documents (`refcheck` has no aggregate, so its `metrics`
 and `variance` are empty objects — the skeleton still holds); `extract`,
 `check` and `atomize` emit the enriched item list and are out of this
 contract.
@@ -216,7 +219,7 @@ input-only.
 - The CLI never composes output content — evaluators/pipelines assemble the
   full documents including `_meta`; the CLI resolves paths and dumps JSON.
 - Commands: `extract`, `check`, `atomize`, `refcheck`, `ragcheck`,
-  `faithcheck`, `eval extractor`, `eval checker`.
+  `faithcheck`, `compare`, `eval extractor`, `eval checker`.
 
 ## Error propagation
 

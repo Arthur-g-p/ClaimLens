@@ -456,15 +456,18 @@ class CheckerEvaluator(Evaluator):
             return round(d["f1-score"], 4) if d["support"] else None
 
         issued = len(gt_flat) + parse_errors
+        # Every claim unjudged: the helpers return 0.0 for empty input, but
+        # nothing was judged — null, never 0.0.
+        judged = bool(gt_flat)
         return CheckerEvalResult(
-            accuracy=round(acc, 4),
+            accuracy=round(acc, 4) if judged else None,
             total_claims=len(gt_flat),
             total_items=total_items,
             parse_errors=parse_errors,
             report=report,
             confusion_matrix={"labels": LABELS, "matrix": cm},
             skipped=skip_info,
-            macro_f1=round(report["macro avg"]["f1-score"], 4),
+            macro_f1=round(report["macro avg"]["f1-score"], 4) if judged else None,
             checker_failure_rate=(
                 round(parse_errors / issued, 4) if issued else None
             ),

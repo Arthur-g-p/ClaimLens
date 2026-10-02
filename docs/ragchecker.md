@@ -365,3 +365,22 @@ constellation" would be lost. Whether volunteered facts should be
 punished, ignored or only flagged is not decided. Until it is, read
 `noise_sensitivity` and `hallucination` with this in mind when the system
 under test is a talkative one.
+
+### Answers without claims (unsolved)
+
+The reverse case exists too: a response with content from which no claims
+are extracted. The extractor reads the response alone, never the question,
+so a bare answer states nothing it could turn into a claim:
+
+| question | response | claims extracted | detected as abstention | how it is scored |
+| --- | --- | --- | --- | --- |
+| How long is Kepler-22b's year? | "290 days." | none | yes, wrongly | as an abstention: recall 0, precision `null`, although the answer may be right |
+
+The question is left out of extraction on purpose. With it in the prompt,
+the extractor leaned toward claims that answer the question and dropped the
+rest of the response. For one-word and one-phrase answers the trade-off
+reverses: without the question they state nothing. In RAGChecker's human
+meta-evaluation set, 23 of 560 responses are such fragments ("geek",
+"Italy", "Yes", "Chapter 18"), and all 23 count as abstentions. Read
+`unjustified_abstention_rate` and recall with this in mind when the system
+under test gives short answers.

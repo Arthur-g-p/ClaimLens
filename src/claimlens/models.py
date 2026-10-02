@@ -110,7 +110,7 @@ class CheckerEvalResult:
     The report dict mirrors sklearn's classification_report(output_dict=True).
     """
 
-    accuracy: float                        # overall fraction correct
+    accuracy: float | None                 # overall fraction correct; None when nothing was judged
     total_claims: int                      # claims actually compared (excl. parse errors)
     total_items: int                       # items evaluated
     parse_errors: int                      # claims with None verdict (excluded from metrics)
