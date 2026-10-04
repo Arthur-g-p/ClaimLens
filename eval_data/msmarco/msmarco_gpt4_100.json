@@ -2930,7 +2930,7 @@
           "frequently used as",
           "reagent in Pinnick oxidation"
         ],
-        "human_label": "Entailment"
+        "human_label": "Contradiction"
       },
       {
         "triplet": [
@@ -3032,7 +3032,7 @@
           "is a source of",
           "dietary fiber"
         ],
-        "human_label": "Entailment"
+        "human_label": "Neutral"
       },
       {
         "triplet": [
@@ -3048,7 +3048,7 @@
           "is a source of",
           "minerals"
         ],
-        "human_label": "Entailment"
+        "human_label": "Neutral"
       },
       {
         "triplet": [

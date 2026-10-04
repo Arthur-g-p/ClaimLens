@@ -21,7 +21,7 @@ The original is reconstructible from the RefChecker repository.
 
 ## What was changed, and what was not
 
-> **Twelve human labels were changed** — listed at the end of this file. Every
+> **Fifteen human labels were changed** — listed at the end of this file. Every
 > other verdict is exactly as the RefChecker annotators left it.
 
 The extractions around those labels were repaired. The annotation task judged
@@ -77,8 +77,8 @@ nothing about relevance.
 
 | file | items | abstentions | triplets | Entailment | Neutral | Contradiction | always-Ent. baseline |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `msmarco_gpt4_100.json` | 100 | 10 | 487 | 450 (92%) | 35 (7%) | 2 (0.4%) | 92.4% |
-| `msmarco_gpt4_50.json` | 50 | 3 | 260 | 237 (91%) | 22 (8%) | 1 (0.4%) | 91.2% |
+| `msmarco_gpt4_100.json` | 100 | 10 | 487 | 447 (92%) | 37 (8%) | 3 (0.6%) | 91.8% |
+| `msmarco_gpt4_50.json` | 50 | 3 | 260 | 236 (91%) | 22 (8%) | 2 (0.8%) | 90.8% |
 | `msmarco_gpt4_25.json` | 25 | 1 | 116 | 113 (97%) | 3 (3%) | 0 | 97.4% |
 | `msmarco_gpt4_5.json` | 5 | 1 | 15 | 14 (93%) | 1 (7%) | 0 | 93.3% |
 
@@ -100,7 +100,7 @@ The distribution is heavily skewed, which matters when reading `eval checker`:
 a checker that answered "Entailment" every single time would score about 92%
 accuracy on this file. Accuracy alone is therefore close to meaningless here —
 the per-class figures and the confusion matrix are what carry information, and
-the two Contradiction cases are far too few to say anything reliable about
+the three Contradiction cases are far too few to say anything reliable about
 contradiction detection.
 
 The skew is expected rather than anomalous. The paper reports the Contradiction
@@ -127,6 +127,9 @@ The evaluation procedure is described in full in the evaluation article.
 | `810239` | dogs urinating all the time → caused by → urinary tract infections | Neutral | Entailment | "Causes of Urination Problems in Dogs" names UTI as a physical cause |
 | `810239` | dogs urinating all the time → caused by → interstitial cystitis | Entailment | Neutral | the passage lists it as a cause of frequent urination without saying it applies to dogs |
 | `810239` | dogs urinating all the time → caused by → damage to nerves that supply the bladder | Entailment | Neutral | the passage describes urges to urinate without saying it applies to dogs |
+| `1072119` | Sodium chlorate → frequently used as → reagent in Pinnick oxidation | Entailment | Contradiction | the passage names sodium *chlorite* as the reagent; chlorite and chlorate are different compounds, another passage reduces the one to the other |
+| `405776` | celery juice → is a source of → dietary fiber | Entailment | Neutral | the only passage on fiber is about celery, not celery juice |
+| `405776` | celery juice → is a source of → minerals | Entailment | Neutral | minerals are named for chopped celery; the celery juice passage names only vitamin C |
 
 The seven `810239` changes follow one rule: a cause counts only if a passage ties it to
 dogs. The original labels went the other way, rejecting the four diseases that
