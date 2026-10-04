@@ -540,8 +540,8 @@ class ExtractorEvaluator(Evaluator):
 
         Absent or null GT key = missing data → dropped (the same rule as
         ragcheck's gt_answer: absent is missing, an explicit empty is data).
-        An empty GT list is data: "nothing to extract" — the annotated
-        no-answer, which is what makes unwarranted answers detectable.
+        An empty GT list is data: "nothing to extract" — the response
+        abstained, which is what makes a misread abstention detectable.
         If zero survive → InvalidInputError; if every response-bearing item
         lacks the GT key, that is a wrong file or wrong --gt-key — fatal,
         and caught before any LLM call.
@@ -650,17 +650,17 @@ class ExtractorEvaluator(Evaluator):
         unjudged_pred = sum(len(ir.unjudged_pred) for ir in item_results)
 
         # Answer missed: every GT triplet is an uncovered GT claim (FN)
-        abstention_fn_penalty = sum(
+        answer_missed_penalty = sum(
             len(item[self._gt_key]) for item in buckets.answer_missed
         )
 
         # Abstention misread: every predicted triplet is an unsupported prediction (FP)
-        answer_fp_penalty = sum(
+        abstention_misread_penalty = sum(
             len(item[self._pred_key]) for item in buckets.abstention_misread
         )
 
-        recall_den = covered + missed + abstention_fn_penalty
-        precision_den = supported + unsupported + answer_fp_penalty
+        recall_den = covered + missed + answer_missed_penalty
+        precision_den = supported + unsupported + abstention_misread_penalty
 
         recall = round(covered / recall_den, 4) if recall_den > 0 else None
         precision = round(supported / precision_den, 4) if precision_den > 0 else None
@@ -676,7 +676,7 @@ class ExtractorEvaluator(Evaluator):
             "total_gt_claims": recall_den + unjudged_gt,
             "covered": covered,
             "missed": missed,
-            "answer_missed_penalty": abstention_fn_penalty,
+            "answer_missed_penalty": answer_missed_penalty,
             "unjudged": unjudged_gt,
             "denominator": recall_den,
         }
@@ -684,7 +684,7 @@ class ExtractorEvaluator(Evaluator):
             "total_pred_claims": precision_den + unjudged_pred,
             "supported": supported,
             "unsupported": unsupported,
-            "abstention_misread_penalty": answer_fp_penalty,
+            "abstention_misread_penalty": abstention_misread_penalty,
             "unjudged": unjudged_pred,
             "denominator": precision_den,
         }

@@ -214,7 +214,7 @@ input-only.
 - The CLI calls the app **once**. BaseService family: `run_sync(data)` plus a
   `last_*` attribute for derived artifacts (`AtomizationService.last_trace`,
   `RagCheckerPipeline.last_report` + `last_findings`, likewise
-  `FaithfulnessPipeline`). Evaluator family: a returned document pair
+  `FaithfulnessPipeline` and `ComparePipeline`). Evaluator family: a returned document pair
   `(record, findings)`. Both shapes are defined under "Output documents".
 - The CLI never composes output content — evaluators/pipelines assemble the
   full documents including `_meta`; the CLI resolves paths and dumps JSON.

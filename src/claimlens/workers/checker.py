@@ -84,11 +84,14 @@ class ClaimVerdict:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _format_reference(reference: list[str]) -> str:
+def _format_reference(reference: list[str] | str) -> str:
     """Join a list of reference passages into a single string for the prompt.
 
-    Each passage is numbered for clarity.
+    Each passage is numbered for clarity. A bare string is one passage —
+    iterating it would number its characters.
     """
+    if isinstance(reference, str):
+        return reference
     if len(reference) == 1:
         return reference[0]
     return "\n".join(
@@ -96,8 +99,10 @@ def _format_reference(reference: list[str]) -> str:
     )
 
 
-def _reference_word_count(reference: list[str]) -> int:
-    """Total word count across all reference passages."""
+def _reference_word_count(reference: list[str] | str) -> int:
+    """Total word count across all reference passages (a bare string is one)."""
+    if isinstance(reference, str):
+        return len(reference.split())
     return sum(len(p.split()) for p in reference)
 
 

@@ -61,6 +61,10 @@ class TestFormatReference:
         result = _format_reference(["A", "B"])
         assert result == "[Passage 1] A\n[Passage 2] B"
 
+    def test_bare_string_is_one_passage(self):
+        """A single reference is a single reference, not a list of characters."""
+        assert _format_reference("Faust was written by Goethe.") == "Faust was written by Goethe."
+
 
 # ── _reference_word_count tests ──────────────────────────────────────────────
 
@@ -77,6 +81,9 @@ class TestReferenceWordCount:
 
     def test_empty_string_passage(self):
         assert _reference_word_count([""]) == 0
+
+    def test_bare_string_counts_words_not_characters(self):
+        assert _reference_word_count("Faust was written by Goethe.") == 5
 
 
 # ── _effective_joint_num tests ───────────────────────────────────────────────
