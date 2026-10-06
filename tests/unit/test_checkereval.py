@@ -8,7 +8,7 @@ metric computation, and edge cases (parse errors, empty GT, missing keys).
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from claimlens.eval.checkereval import CheckerEvaluator, LABELS
+from claimlens.eval.checkereval import CheckerEvaluator, LABELS, flatten_verdict
 from claimlens.models import CheckerEvalResult
 
 
@@ -199,6 +199,8 @@ class TestPrepareForService:
         evaluator._service_kg_key = "_gt_eval_response_kg"
         evaluator._verdict_key = "gpt4o_checker_verdict"
         evaluator._explanation_key = "gpt4o_checker_explanation"
+        evaluator._error_key = "gpt4o_checker_error"
+        evaluator._retry_key = "gpt4o_checker_retry"
 
         item = _make_gt_item([("a", "b", "c")], ["Entailment"])
         # All triplets labeled → gt_labels_map has sequential indices
@@ -208,6 +210,8 @@ class TestPrepareForService:
         assert "_gt_eval_response_kg" in item
         # Should contain only the labeled triplet
         assert len(item["_gt_eval_response_kg"]) == 1
+        # A bare-string reference is one chunk, not one per character
+        assert item["_gt_eval_chunks"] == ["Some reference text."]
 
     @patch("claimlens.eval.checkereval.CheckingService")
     def test_strips_existing_verdicts(self, mock_svc_cls):
@@ -216,17 +220,23 @@ class TestPrepareForService:
         evaluator._service_kg_key = "_gt_eval_response_kg"
         evaluator._verdict_key = "gpt4o_checker_verdict"
         evaluator._explanation_key = "gpt4o_checker_explanation"
+        evaluator._error_key = "gpt4o_checker_error"
+        evaluator._retry_key = "gpt4o_checker_retry"
 
         item = _make_gt_item([("a", "b", "c")], ["Entailment"])
-        # Add pre-existing verdicts
+        # Add pre-existing verdicts, flat and per chunk
         item["claude2_response_kg"][0]["gpt4o_checker_verdict"] = "Neutral"
         item["claude2_response_kg"][0]["gpt4o_checker_explanation"] = "old"
+        item["claude2_response_kg"][0]["gpt4o_checker_verdicts"] = {0: "Neutral"}
+        item["claude2_response_kg"][0]["gpt4o_checker_retries"] = {0: 1}
 
         gt_map = {0: {0: "Entailment"}}
         evaluator._prepare_for_service([item], gt_map)
 
         assert "gpt4o_checker_verdict" not in item["_gt_eval_response_kg"][0]
         assert "gpt4o_checker_explanation" not in item["_gt_eval_response_kg"][0]
+        assert "gpt4o_checker_verdicts" not in item["_gt_eval_response_kg"][0]
+        assert "gpt4o_checker_retries" not in item["_gt_eval_response_kg"][0]
 
     @patch("claimlens.eval.checkereval.CheckingService")
     def test_filters_unlabeled_and_remaps(self, mock_svc_cls):
@@ -236,6 +246,8 @@ class TestPrepareForService:
         evaluator._service_kg_key = "_gt_eval_response_kg"
         evaluator._verdict_key = "gpt4o_checker_verdict"
         evaluator._explanation_key = "gpt4o_checker_explanation"
+        evaluator._error_key = "gpt4o_checker_error"
+        evaluator._retry_key = "gpt4o_checker_retry"
 
         # 3 triplets, only index 0 and 2 have labels
         item = _make_gt_item(
@@ -434,7 +446,7 @@ class TestItemsAndFindings:
         assert len(items) == 1 and len(items[0]["claims"]) == 2
         assert items[0]["claims"][1] == {
             "claim": "d e f", "human_label": "Entailment",
-            "verdict": "Entailment", "explanation": None,
+            "verdict": "Entailment", "explanation": None, "chunks": [],
         }
 
         out = ev._build_findings(items)
@@ -446,6 +458,7 @@ class TestItemsAndFindings:
             "human_label": "Entailment",
             "verdict": "Neutral",
             "explanation": "no passage says so",
+            "chunks": [],
         }]
 
     def test_perfect_item_is_in_items_but_not_in_findings(self):
@@ -477,7 +490,7 @@ class TestItemsAndFindings:
         assert out["wrong"] == []
         assert out["unjudged"] == [{
             "id": "u1", "question": "", "claim": "a b c",
-            "human_label": "Neutral", "cause": "parse_failure",
+            "human_label": "Neutral", "cause": "parse_failure", "chunks": [],
         }]
 
     def test_only_labeled_indices_are_walked(self):
@@ -575,6 +588,9 @@ class TestRunDocuments:
         ev._explanation_key = "gpt4o_checker_explanation"
         ev._error_key = "gpt4o_checker_error"
         ev._retry_key = "gpt4o_checker_retry"
+        from claimlens.models import Direction
+        ev._direction = Direction(name="checker_eval", kg_key="_gt_eval_response_kg",
+                                  per_chunk=True, chunks_key="_gt_eval_chunks")
 
         async def fake_run(items):
             verdicts = iter(["Entailment", "Neutral", "Contradiction"])
@@ -586,6 +602,11 @@ class TestRunDocuments:
 
         ev._service = MagicMock(base_url=None, joint=True, joint_num=10,
                                 max_words=6000, mode_label="joint",
+                                verdict_key="gpt4o_checker_verdict",
+                                explanation_key="gpt4o_checker_explanation",
+                                checker_error_key="gpt4o_checker_error",
+                                checker_retry_key="gpt4o_checker_retry",
+                                extraction_error_key="_gt_eval_extraction_error",
                                 run=AsyncMock(side_effect=fake_run))
 
         items = [
@@ -608,7 +629,8 @@ class TestRunDocuments:
         assert findings["runs"][0]["findings"]["wrong"] == [{
             "id": "i1", "question": "test question", "claim": "cats are pets",
             "human_label": "Entailment", "verdict": "Neutral",
-            "explanation": "because",
+            "explanation": None,
+            "chunks": [{"verdict": "Neutral", "explanation": "because"}],
         }]
         assert findings["runs"][0]["findings"]["unjudged"] == []
 
@@ -644,3 +666,101 @@ class TestRetryMarker:
         wrong = ev._build_findings(items)["wrong"]
         assert wrong[0]["retry"] == 2
         assert "retry" not in wrong[1]
+
+
+# ── Per-chunk checking (the production setting) ─────────────────────────────
+
+class TestFlattenVerdict:
+    """One claim verdict from its per-chunk row: the checker prompt's own
+    order, unknown is not "no"."""
+
+    def test_any_entailment_wins_even_next_to_unknown(self):
+        assert flatten_verdict(["Neutral", None, "Entailment", "Entailment"]) == ("Entailment", [2])
+
+    def test_unknown_without_entailment_is_unjudged(self):
+        assert flatten_verdict(["Contradiction", None]) == (None, [])
+
+    def test_contradiction_beats_neutral(self):
+        assert flatten_verdict(["Neutral", "Contradiction"]) == ("Contradiction", [1])
+
+    def test_neutral_is_decided_by_every_chunk(self):
+        assert flatten_verdict(["Neutral", "Neutral"]) == ("Neutral", [0, 1])
+
+    def test_no_chunks_is_unjudged(self):
+        assert flatten_verdict([]) == (None, [])
+
+
+class TestPerChunkRun:
+    """The evaluator checks each claim against one chunk per call, the way
+    ragcheck's matrix directions do, and compares the flattened verdict."""
+
+    def _evaluator(self, fake_run):
+        ev = CheckerEvaluator("gpt4o", runs=1)
+        ev._service = MagicMock(
+            base_url=None, mode_label="joint",
+            verdict_key="gpt4o_checker_verdict",
+            explanation_key="gpt4o_checker_explanation",
+            checker_error_key="gpt4o_checker_error",
+            checker_retry_key="gpt4o_checker_retry",
+            extraction_error_key="_gt_eval_extraction_error",
+            run=AsyncMock(side_effect=fake_run))
+        return ev
+
+    def test_one_chunk_per_call_and_flattened_verdict(self):
+        import asyncio
+        seen_references = []
+
+        async def fake_run(shadow):
+            # Entailment only from the chunk that names the fact
+            for s in shadow:
+                seen_references.append(s["reference"])
+                for t in s["_gt_eval_response_kg"]:
+                    hit = t["object"] in s["reference"][0]
+                    t["gpt4o_checker_verdict"] = "Entailment" if hit else "Neutral"
+                    t["gpt4o_checker_explanation"] = s["reference"][0]
+            return shadow
+
+        ev = self._evaluator(fake_run)
+        items = [_make_gt_item(
+            [("dogs", "are", "animals"), ("sky", "is", "green")],
+            ["Entailment", "Entailment"],
+            reference=["Cats are pets.", "Dogs are animals."],
+            extra_keys={"id": "i1"})]
+
+        record, findings = asyncio.run(ev.evaluate(items))
+
+        assert seen_references == [["Cats are pets."], ["Dogs are animals."]]
+        claims = record["runs"][0]["items"][0]["claims"]
+        assert claims[0]["verdict"] == "Entailment"
+        assert claims[0]["explanation"] == "Dogs are animals."
+        assert [c["verdict"] for c in claims[0]["chunks"]] == ["Neutral", "Entailment"]
+        assert claims[1]["verdict"] == "Neutral"
+        assert claims[1]["explanation"] is None
+        assert record["runs"][0]["counts"]["data"]["checks"] == 4
+        assert record["runs"][0]["_meta"]["checking"] == "per_chunk"
+        assert record["metrics"]["accuracy"] == 0.5
+        wrong = findings["runs"][0]["findings"]["wrong"]
+        assert [w["claim"] for w in wrong] == ["sky is green"]
+        assert len(wrong[0]["chunks"]) == 2
+
+    def test_failed_chunk_without_entailment_is_unjudged_with_its_cause(self):
+        import asyncio
+
+        async def fake_run(shadow):
+            for k, s in enumerate(shadow):
+                for t in s["_gt_eval_response_kg"]:
+                    if k == 0:
+                        t["gpt4o_checker_verdict"] = "Neutral"
+                    else:
+                        t["gpt4o_checker_verdict"] = None
+                        t["gpt4o_checker_error"] = "parse_failure"
+            return shadow
+
+        ev = self._evaluator(fake_run)
+        items = [_make_gt_item([("a", "b", "c")], ["Neutral"],
+                               reference=["one", "two"], extra_keys={"id": "u"})]
+
+        record, findings = asyncio.run(ev.evaluate(items))
+
+        assert record["metrics"]["checker_failure_rate"] == 1.0
+        assert findings["runs"][0]["findings"]["unjudged"][0]["cause"] == "parse_failure"

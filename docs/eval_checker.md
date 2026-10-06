@@ -1,6 +1,8 @@
 # Checker Evaluator (`CheckerEvaluator`)
 
-The Checker Evaluator measures the entailment classification accuracy of the `CheckingService`. It takes ground-truth (GT) triplets annotated with a `human_label` (e.g., Entailment, Contradiction, Neutral) and runs them through the `CheckingService` to predict their verdicts against a reference passage.
+The Checker Evaluator measures the entailment classification accuracy of the `CheckingService`. It takes ground-truth (GT) triplets annotated with a `human_label` (e.g., Entailment, Contradiction, Neutral) and runs them through the `CheckingService` to predict their verdicts against the item's reference.
+
+It measures the production setting: every claim is checked against **one chunk per call**, exactly as ragcheck's and faithcheck's matrix directions do (the same direction runner, the same prompt, the same joint bundling of claims). The human labels judge each claim against the whole reference, not per chunk, so the per-chunk verdicts are flattened to one verdict per claim before they are compared.
 
 ---
 
@@ -11,7 +13,8 @@ Input (list[dict])
   │
   ├─ _validate()    →  Filters for items that have both a reference and GT triplets with `human_label`.
   ├─ _strip()       →  Removes any existing verdicts from the GT triplets to force a full recompute.
-  ├─ Check          →  Delegates to `CheckingService` to predict verdicts (Joint or Single mode).
+  ├─ Check          →  Each claim vs each chunk, one chunk per call (the ragcheck matrix direction).
+  ├─ Flatten        →  One verdict per claim from its per-chunk row.
   ├─ _compare()     →  Compares predicted verdicts 1:1 against the `human_label`s.
   ├─ Metrics        →  Computes Accuracy, per-class F1/Precision/Recall, and a confusion matrix.
   └─ Disagreements  →  Collects every wrong or unjudged claim per item into a second document.
@@ -29,16 +32,28 @@ Ensures the data has the required ground-truth fields for evaluation.
 
 The `CheckingService` skips claims that already have a verdict to save API costs. Because the evaluation relies on measuring the model's performance, the evaluator strips all existing verdicts and reasons from the GT triplets before checking them, ensuring a clean slate.
 
-## Step 3: Checking
+## Step 3: Checking, one chunk per call
 
-Delegates execution to the `CheckingService` using the configured `checker_model` and `joint_num` settings. 
-The service calls the LLM, parses the entailment verdict out of the response, and populates the `verdict` and `reason` fields on the triplets in-place.
+The item's reference is read as its list of chunks (a bare string is one chunk). Delegates execution to the `CheckingService` through `pipelines/directions.run_direction` in matrix mode, the runner ragcheck uses for `retrieved2response` and `retrieved2answer`: one check per (item, chunk), claims bundled per call by `joint_num` as usual. The per-chunk results land on each triplet as `{chunk_index: value}` dicts (`{checker}_checker_verdicts`, `_explanations`, sparse `_errors` and `_retries`).
+
+## Step 3b: Flattening
+
+One verdict per claim, in the order the checker prompt itself states:
+
+| per-chunk row | claim verdict |
+| --- | --- |
+| any chunk Entailment | Entailment (decided by the first such chunk) |
+| no Entailment, a chunk unjudged | none: the unjudged chunk could have entailed, so the claim is unjudged (ragcheck's matrix rule) |
+| no Entailment, a chunk Contradiction | Contradiction (decided by the first such chunk) |
+| every chunk Neutral | Neutral (decided by every chunk) |
+
+The claim's `explanation` is the deciding chunk's; a Neutral has none. Its `retry` is the highest round among the deciding chunks.
 
 ## Step 4: Comparison (`_compare_verdicts`)
 
 Iterates over every validated triplet and directly compares the newly predicted `verdict` against its original `human_label`. 
 
-- Collects matched triplets into lists for `y_true` (ground truth) and `y_pred` (predictions).
+- Collects matched triplets into lists for `y_true` (ground truth) and `y_pred` (flattened predictions).
 - Claims with no verdict (checker failure) are excluded from both lists and counted as unjudged.
 
 ## Step 5: Metrics and Disagreements
@@ -97,7 +112,7 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
       "_meta": { "...": "...", "run": 1, "duration_seconds": 13.5 },
       "metrics": { "...same keys, this run's values..." },
       "counts": {
-        "data":     { "dropped_no_gt_claims": 1, "dropped_no_reference": 0, "dropped_no_labels": 0, "unlabeled_claims": 0 },
+        "data":     { "dropped_no_gt_claims": 1, "dropped_no_reference": 0, "dropped_no_labels": 0, "unlabeled_claims": 0, "checks": 1160 },
         "verdicts": { "labeled": 116, "correct": 98, "wrong": 18, "unjudged": 0 },
         "labels":   { "Entailment": 113, "Contradiction": 0, "Neutral": 3 },
         "per_label": { "Entailment": { "precision": 1.0, "recall": 0.841, "f1": 0.913, "total": 113 },
@@ -108,7 +123,9 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
         { "id": "1006506", "question": "...", "response": "...",
           "claims": [ { "claim": "Mount Nyiragongo last erupted on January 17, 2002",
                         "human_label": "Entailment", "verdict": "Neutral",
-                        "explanation": "The reference states that an eruption occurred in 2002 but ..." } ] }
+                        "explanation": null,
+                        "chunks": [ { "verdict": "Neutral", "explanation": "The passage states that an eruption occurred in 2002 but ..." },
+                                    "..." ] } ] }
       ]
     }
   ]
@@ -120,8 +137,12 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
 - `counts` mirrors the console blocks one to one: 📂 Data, 🔎 Verdicts,
   the label distribution (its largest share is the majority baseline), the
   📊 Per-Label Report cell for cell, the 📉 Confusion Matrix.
-- `items` lists every evaluated item with every labeled claim. A claim
-  without a verdict carries `"error": <cause>`.
+- `items` lists every evaluated item with every labeled claim: the
+  flattened `verdict`, the deciding chunk's `explanation`, and `chunks`,
+  the per-chunk row in chunk order. A claim without a verdict carries
+  `"error": <cause>`.
+- `counts.data.checks` is the number of claim × chunk checks;
+  `_meta.checking` is `"per_chunk"`.
 - The reference is not repeated (it can be a full retrieved context per
   item); join back to the input on `id`.
 
@@ -140,15 +161,18 @@ its item. Empty branches stay present — hidden is not zero.
         "wrong":    [ { "id": "1006506", "question": "when did mount nyiragongo last erupted",
                         "claim": "Mount Nyiragongo last erupted on January 17, 2002",
                         "human_label": "Entailment", "verdict": "Neutral",
-                        "explanation": "The reference states that an eruption occurred in 2002 but ..." } ],
-        "unjudged": [ { "id": "...", "question": "...", "claim": "...", "human_label": "...", "cause": "timeout" } ]
+                        "explanation": null, "chunks": [ "...per-chunk row..." ] } ],
+        "unjudged": [ { "id": "...", "question": "...", "claim": "...", "human_label": "...", "cause": "timeout",
+                        "chunks": [ "..." ] } ]
       } }
   ]
 }
 ```
 
-- `wrong` — the checker's explanation is the text to read when deciding
-  whether the checker or the annotator erred.
+- `wrong` — the per-chunk row is the text to read when deciding
+  whether the checker or the annotator erred. A disagreement does not
+  show its cause: the label was set against the whole reference, the
+  verdict per chunk.
 - `unjudged` — no verdict; `cause` from the checker error marker. Not a
   disagreement, but the item stays traceable.
 - `_meta` is a copy of the record's, so the two files identify each other.

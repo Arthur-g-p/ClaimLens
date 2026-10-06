@@ -49,7 +49,7 @@ build-backend = "hatchling.build"
 packages = ["src/claimlens"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["eval_data/", "examples/", "docs/", "scratch/"]
+exclude = ["eval_data/", "examples/", "docs/", "scratch/", "experiments/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,8 +4,15 @@ Checker Evaluator — triplet-level entailment classification accuracy.
 Runs the checker on GT triplets (with human_label) and compares
 the checker's predicted verdicts 1:1 against the human annotations.
 
+The checker runs in the production setting: every claim against one chunk
+per call, exactly as ragcheck's and faithcheck's matrix directions do (same
+runner, same prompt), then the per-chunk verdicts are flattened to one
+verdict per claim. The human labels judge each claim against the whole
+reference, so the flattened verdict is what they can be compared to.
+
 Architecture:
-    - Delegates ALL checking to CheckingService (zero duplication).
+    - Delegates ALL checking to CheckingService through the pipelines'
+      direction runner (zero duplication).
     - Owns only: GT validation, verdict comparison, metric computation,
       the record + findings documents, and the ── CHECKER EVAL ── logging section.
     - Does NOT inherit BaseService — evaluators measure, services mutate.
@@ -21,7 +28,7 @@ from claimlens.eval.metrics import (
     classification_report,
     confusion_matrix,
 )
-from claimlens.models import DEFAULT_RETRY_ROUNDS, CheckerEvalResult
+from claimlens.models import DEFAULT_RETRY_ROUNDS, CheckerEvalResult, Direction
 from claimlens.stats import (
     GLOBAL_STATS,
     usage_since,
@@ -35,6 +42,7 @@ from claimlens.utils import (
 from claimlens.eval.base import Evaluator
 from claimlens.services.base import BaseService
 from claimlens.services.checking import CheckingService
+from claimlens.pipelines.directions import run_direction
 
 logger = settings.get_logger(__name__)
 
@@ -42,10 +50,34 @@ logger = settings.get_logger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 
 LABELS = ["Entailment", "Contradiction", "Neutral"]
+_ENTAILMENT, _CONTRADICTION, _NEUTRAL = LABELS
 
 # Internal extractor model name used to build the service's kg_key.
 # This decouples the user's gt_key from the _response_kg convention.
 _INTERNAL_EXT_MODEL = "_gt_eval"
+
+# The item's reference as a chunk list, so a bare-string reference is one
+# chunk rather than one chunk per character.
+_CHUNKS_KEY = "_gt_eval_chunks"
+
+
+def flatten_verdict(verdicts: list[str | None]) -> tuple[str | None, list[int]]:
+    """One claim verdict from its per-chunk verdicts, plus the chunk
+    indices that decide it.
+
+    The order is the checker prompt's own rule: Entailment if ANY chunk
+    entails; else Contradiction if a chunk contradicts; else Neutral. An
+    unknown chunk (None) is not "no": with no Entailment it could still have
+    been one, so the claim is unjudged — the same rule as ragcheck's
+    matrix rows.
+    """
+    if _ENTAILMENT in verdicts:
+        return _ENTAILMENT, [verdicts.index(_ENTAILMENT)]
+    if None in verdicts or not verdicts:
+        return None, []
+    if _CONTRADICTION in verdicts:
+        return _CONTRADICTION, [verdicts.index(_CONTRADICTION)]
+    return _NEUTRAL, list(range(len(verdicts)))
 
 
 class CheckerEvaluator(Evaluator):
@@ -111,6 +143,10 @@ class CheckerEvaluator(Evaluator):
         self._explanation_key = f"{checker_model}_checker_explanation"
         self._error_key = f"{checker_model}_checker_error"
         self._retry_key = f"{checker_model}_checker_retry"
+        self._direction = Direction(
+            name="checker_eval", kg_key=self._service_kg_key,
+            per_chunk=True, chunks_key=_CHUNKS_KEY,
+        )
 
         # The service owns all checking logic. compact verbosity keeps its
         # per-phase API/BL blocks but leaves the pre-exec sections and the
@@ -171,8 +207,10 @@ class CheckerEvaluator(Evaluator):
         #         strip existing verdicts, remap indices
         self._prepare_for_service(evaluable, gt_labels_map)
 
-        # Step 4: Delegate to CheckingService
-        await self._service.run(evaluable)
+        # Step 4: Delegate to CheckingService, one chunk per call — the
+        # matrix direction ragcheck runs — then flatten each claim's row.
+        await run_direction(self._service, evaluable, self._direction)
+        self._flatten(evaluable)
 
         # Step 5: Compare verdicts vs human labels
         gt_flat, pred_flat, parse_errors = self._compare(
@@ -213,6 +251,7 @@ class CheckerEvaluator(Evaluator):
             total_items=total_items,
             evaluated_items=result.total_items,
             dropped_items=sk["missing_gt"] + sk["missing_context"] + sk["empty_gt"],
+            checking="per_chunk",
             request_strategies=GLOBAL_STATS.strategies(),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
@@ -243,6 +282,7 @@ class CheckerEvaluator(Evaluator):
                 "dropped_no_reference": sk["missing_context"],
                 "dropped_no_labels": sk["empty_gt"],
                 "unlabeled_claims": sk.get("unlabeled_claims", 0),
+                "checks": sum(len(c["chunks"]) for c in claims),
             },
             # 🔎 Verdicts tree
             "verdicts": {
@@ -383,10 +423,65 @@ class CheckerEvaluator(Evaluator):
                 for new_idx, old_idx in enumerate(labeled_indices)
             }
 
-            # Strip existing verdicts — force recompute ALL
+            reference = item["reference"]
+            item[_CHUNKS_KEY] = reference if isinstance(reference, list) else [reference]
+
+            # Strip existing verdicts — force recompute ALL. The per-chunk
+            # dicts would otherwise merge old cells into the new row.
             for triplet in item[self._service_kg_key]:
-                triplet.pop(self._verdict_key, None)
-                triplet.pop(self._explanation_key, None)
+                for key in (self._verdict_key, self._explanation_key,
+                            self._error_key, self._retry_key,
+                            *self._matrix_keys()):
+                    triplet.pop(key, None)
+
+    def _matrix_keys(self) -> tuple[str, str, str, str]:
+        """Where the direction runner folds the per-chunk results: verdicts,
+        explanations, errors, retries — each {chunk_index: value}."""
+        return (self._verdict_key + "s", self._explanation_key + "s",
+                self._error_key + "s", self._retry_key[:-1] + "ies")
+
+    def _flatten(self, evaluable: list[dict]) -> None:
+        """Step 4b — one verdict per claim from its per-chunk row.
+
+        Writes the claim-level verdict, the deciding chunk's explanation,
+        the error cause of an unjudged claim and the deciding chunk's retry
+        round under the flat keys _compare and _build_items read. The full
+        row stays on the triplet as the per-chunk dicts.
+        """
+        verdicts_key, explanations_key, errors_key, retries_key = self._matrix_keys()
+        for item in evaluable:
+            n_chunks = len(item[_CHUNKS_KEY])
+            for triplet in item[self._service_kg_key]:
+                row = triplet.get(verdicts_key, {})
+                verdict, decided_by = flatten_verdict(
+                    [row.get(k) for k in range(n_chunks)])
+                triplet[self._verdict_key] = verdict
+                explanations = triplet.get(explanations_key, {})
+                triplet[self._explanation_key] = (
+                    explanations.get(decided_by[0])
+                    if verdict in (_ENTAILMENT, _CONTRADICTION) else None)
+                errors = triplet.get(errors_key, {})
+                if verdict is None and errors:
+                    triplet[self._error_key] = next(iter(errors.values()))
+                retries = triplet.get(retries_key, {})
+                retry = max((retries.get(k, 0) for k in decided_by), default=0)
+                if retry:
+                    triplet[self._retry_key] = retry
+
+    def _chunk_cells(self, triplet: dict, n_chunks: int) -> list[dict]:
+        """The claim's per-chunk row for the record: one cell per chunk, in
+        chunk order, with the sparse error cause and retry round."""
+        verdicts_key, explanations_key, errors_key, retries_key = self._matrix_keys()
+        cells = []
+        for k in range(n_chunks):
+            cell = {"verdict": triplet.get(verdicts_key, {}).get(k),
+                    "explanation": triplet.get(explanations_key, {}).get(k)}
+            if triplet.get(errors_key, {}).get(k):
+                cell["error"] = triplet[errors_key][k]
+            if triplet.get(retries_key, {}).get(k):
+                cell["retry"] = triplet[retries_key][k]
+            cells.append(cell)
+        return cells
 
     def _compare(
         self,
@@ -490,13 +585,15 @@ class CheckerEvaluator(Evaluator):
         gt_labels_map: dict[int, dict[int, str]],
     ) -> list[dict]:
         """The per-item record: every labeled claim with its human label,
-        the checker's verdict and explanation, and the error cause when no
-        verdict came back. Walks the same (item, labeled claim) pairs as
+        the flattened verdict, the deciding chunk's explanation (none for a
+        Neutral, which every chunk decides), the error cause when no verdict
+        came back, and the per-chunk row under ``chunks``. Walks the same (item, labeled claim) pairs as
         _compare, so the counts reconcile with the Verdicts tree."""
         items: list[dict] = []
         for i, item in enumerate(evaluable):
             labeled = gt_labels_map.get(i, {})
             triplets = item[self._service_kg_key]
+            n_chunks = len(item.get(_CHUNKS_KEY, []))
             claims: list[dict] = []
             for claim_idx, label in labeled.items():
                 triplet = triplets[claim_idx]
@@ -510,6 +607,7 @@ class CheckerEvaluator(Evaluator):
                     entry["error"] = triplet.get(self._error_key, "checker_failure")
                 if triplet.get(self._retry_key):
                     entry["retry"] = triplet[self._retry_key]
+                entry["chunks"] = self._chunk_cells(triplet, n_chunks)
                 claims.append(entry)
             items.append({
                 "id": item.get("id", f"item-{i}"),
@@ -525,17 +623,19 @@ class CheckerEvaluator(Evaluator):
         (verdict differs from the human label; the checker's explanation is
         the text to read when deciding whether the checker or the annotator
         erred) and ``unjudged`` (no verdict, with its cause — not a
-        disagreement, but the item must stay traceable). A pure view over
-        the record's items."""
+        disagreement, but the item must stay traceable). Both carry the
+        claim's per-chunk row. A pure view over the record's items."""
         def classify(item: dict):
             for c in item["claims"]:
                 base = {"id": item["id"], "question": item["question"],
                         "claim": c["claim"], "human_label": c["human_label"]}
                 if c["verdict"] is None:
-                    yield "unjudged", {**base, "cause": c.get("error")}
+                    yield "unjudged", {**base, "cause": c.get("error"),
+                                       "chunks": c["chunks"]}
                 elif c["verdict"] != c["human_label"]:
                     yield "wrong", {**base, "verdict": c["verdict"],
-                                    "explanation": c["explanation"], **retry_of(c)}
+                                    "explanation": c["explanation"], **retry_of(c),
+                                    "chunks": c["chunks"]}
 
         return findings_view(["wrong", "unjudged"], items, classify)
 
@@ -575,7 +675,7 @@ class CheckerEvaluator(Evaluator):
                 "     ├─ skipped:  %d claims  (no human_label)", unlabeled
             )
         logger.info(
-            "     └─ valid:    %d items → %s labeled claims",
+            "     └─ valid:    %d items → %s labeled claims, each checked per chunk",
             evaluable_count,
             f"{total_claims:,}",
         )
@@ -592,6 +692,8 @@ class CheckerEvaluator(Evaluator):
         logger.info("    GT key:      %s", self._gt_key)
 
         logger.info("    Mode:        %s", self._service.mode_label)
+        logger.info("    Reference:   one chunk per call, as ragcheck"
+                    " (Entailment if any chunk entails)")
 
         logger.info("    Prompts:     %s", settings.PROMPT_PATH)
         logger.info("")
