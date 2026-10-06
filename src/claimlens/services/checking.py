@@ -482,15 +482,11 @@ class CheckingService(BaseService):
                     for local_id, (_, text) in enumerate(slice_, start=1)
                 ]
                 orig_indices = [orig_idx for orig_idx, _ in slice_]
-                # Only the eval matching prompt declares {{response}}; templates
-                # without it ignore the key.
-                ev = {"response": item.get("response") or "No response text available"}
                 chunks.append(_JointChunk(
                     numbered_claims=numbered,
                     reference=reference,
                     item_index=item_idx,
                     orig_indices=orig_indices,
-                    extra_vars=ev or None,
                 ))
 
         # Send all chunks as a single batch (progress bar + concurrency)

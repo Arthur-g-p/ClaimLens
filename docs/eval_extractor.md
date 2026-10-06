@@ -132,6 +132,19 @@ For `to_compare` items, two independent passes through `CheckingService` in
 Two passes, two independent counts — following RAGChecker, there is **no shared
 TP and no `min()`**.
 
+### Why the matcher never sees the response
+
+Matching is claim against claim. The matcher once also got the response text, to
+tell whether two phrasings name the same thing. It used the text as evidence
+instead: a claim with no counterpart on the other side was matched because the
+response states it. That inflates both ratios, and in pass 2 it hides exactly
+the facts the ground truth is missing. On `msmarco_claude2` (707 predicted
+claims, the same predictions for every run), withholding the response dropped
+recall from 0.88 to 0.65 and precision from 0.89 to 0.81; in a hand sample of
+the lost matches, about 9 in 10 had no counterpart at all. The price is a few
+real paraphrases with a framing word ("HP insists X works best" against "X works
+best") now judged a miss.
+
 ### Three verdict outcomes, not two
 
 Each claim comes back as exactly one of:

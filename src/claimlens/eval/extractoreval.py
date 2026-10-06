@@ -798,7 +798,10 @@ class ExtractorEvaluator(Evaluator):
         Pass 2 (Pred → GT): Pred triplets as claims, GT triplets as reference.
             Non-Entailment = hallucinated/wrong prediction (contributes to FP).
 
-        Uses checker_prompt_eval_joint with {{response}} context.
+        Uses checker_prompt_eval_joint. The response text is withheld on
+        purpose: given it, the matcher matched claims that had no counterpart
+        on the other side (docs/eval_extractor.md, "Why the matcher never
+        sees the response").
         """
         # Build a CheckingService with the eval prompt. Each pass is one
         # phase with its own labeled section rule, like a pipeline direction.
@@ -960,7 +963,6 @@ class ExtractorEvaluator(Evaluator):
 
         Triplets from claims_key become the claims to check.
         Triplets from ref_key are formatted as the reference text.
-        The original response is preserved for the eval prompt's {{response}}.
         """
         service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
         verdict_key = f"{self._checker_model}_checker_verdict"
@@ -982,8 +984,6 @@ class ExtractorEvaluator(Evaluator):
             synth = {
                 # Reference = formatted triplets from the "other" set
                 "reference": [ref_text],
-                # Response text for the eval prompt's {{response}} variable
-                "response": item.get("response", ""),
                 # Claims = triplets to check, under the service's kg_key
                 service_kg_key: [
                     {
