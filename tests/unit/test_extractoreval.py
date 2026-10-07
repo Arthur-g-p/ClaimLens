@@ -659,7 +659,8 @@ class TestUnjudgedInFindings:
         items = ev._build_items(buckets, item_results)
         findings = ev._build_findings(items)
         assert findings["unjudged"] == [
-            {"id": "u1", "question": "q", "claim": "a b c", "side": "gt", "cause": "checker_failure"}]
+            {"id": "u1", "question": "q", "claim": "a b c", "side": "gt", "cause": "checker_failure",
+             "response": "r", "gt_claims": ["a b c"], "pred_claims": ["a b c"]}]
         assert findings["missed"] == [] and findings["unsupported"] == []
 
     def test_perfect_match_is_in_items_but_not_in_findings(self):
@@ -739,7 +740,8 @@ class TestUnjudgedInFindings:
         findings = ev._build_findings(ev._build_items(buckets, item_results))
         assert findings["unjudged"] == [
             {"id": "u2", "question": "q", "claim": "a b c", "side": "gt",
-             "cause": "context_too_long"}]
+             "cause": "context_too_long", "response": "r",
+             "gt_claims": ["a b c"], "pred_claims": ["a b c"]}]
 
 
 
@@ -847,10 +849,14 @@ class TestItemsAndFindings:
         findings = ev._build_findings(items)
         assert list(findings) == ["missed", "unsupported", "answer_missed",
                                   "abstention_misread", "unjudged", "extraction_failed"]
+        # each carries what it is judged against: the response and both claim lists
+        both = {"response": "r", "gt_claims": ["a b c"], "pred_claims": ["x y z"]}
         assert findings["missed"] == [
-            {"id": "test", "question": "q", "claim": "a b c", "verdict": "Neutral", "explanation": "no match"}]
+            {"id": "test", "question": "q", "claim": "a b c", "verdict": "Neutral", "explanation": "no match",
+             **both}]
         assert findings["unsupported"] == [
-            {"id": "test", "question": "q", "claim": "x y z", "verdict": "Neutral", "explanation": "no match"}]
+            {"id": "test", "question": "q", "claim": "x y z", "verdict": "Neutral", "explanation": "no match",
+             **both}]
 
     def test_abstention_misread_findings(self):
         ev = _evaluator()

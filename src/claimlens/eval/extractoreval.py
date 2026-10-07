@@ -1075,21 +1075,29 @@ class ExtractorEvaluator(Evaluator):
         ``answer_missed`` (GT claims lost to an empty extraction),
         ``abstention_misread`` (claims invented from a refusal).
         Reliability — ``extraction_failed`` with its cause. A pure view
-        over the record's items."""
+        over the record's items.
+
+        A matching entry carries what it is judged against, as the checker
+        eval's carry their chunks: the response and both claim lists."""
         def classify(item: dict):
             head = {"id": item["id"], "question": item["question"]}
             bucket = item["bucket"]
             if bucket == "compared":
+                against = {"response": item["response"],
+                           "gt_claims": [c["claim"] for c in item["gt_claims"]],
+                           "pred_claims": [c["claim"] for c in item["pred_claims"]]}
                 for side, key, miss in (("gt", "gt_claims", "missed"),
                                         ("pred", "pred_claims", "unsupported")):
                     for c in item[key]:
                         if c["verdict"] is None:
                             yield "unjudged", {**head, "claim": c["claim"], "side": side,
-                                               "cause": c.get("error", "checker_failure")}
+                                               "cause": c.get("error", "checker_failure"),
+                                               **against}
                         elif c["verdict"] != "Entailment":
                             yield miss, {**head, "claim": c["claim"],
                                          "verdict": c["verdict"],
-                                         "explanation": c["explanation"], **retry_of(c)}
+                                         "explanation": c["explanation"], **retry_of(c),
+                                         **against}
             elif bucket == "answer_missed":
                 yield "answer_missed", {**head, "response": item["response"],
                                         "claims": [c["claim"] for c in item["gt_claims"]]}
