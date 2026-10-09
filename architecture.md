@@ -143,7 +143,7 @@ A new evaluator is a class that inherits `Evaluator` and provides:
 writes both verbatim, adding `_args`. Children services run `compact` at
 `--runs 1` and `silent` in runs mode (the evaluator passes that down).
 
-## Output documents (`schema_version` 5)
+## Output documents (`schema_version` 6)
 
 `refcheck`, `ragcheck`, `faithcheck`, `compare`, `eval checker` and
 `eval extractor` write the same two documents (`refcheck` has no aggregate, so its `metrics`

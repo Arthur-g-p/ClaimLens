@@ -314,11 +314,15 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
       },
       "items": [
         { "id": "12345", "question": "...", "response": "...", "bucket": "compared",
-          "gt_claims":   [ { "claim": "...", "verdict": "Entailment", "explanation": "..." },
-                           { "claim": "...", "verdict": "Neutral",    "explanation": "..." } ],
-          "pred_claims": [ { "claim": "...", "verdict": "Entailment", "explanation": "..." } ] },
+          "gt_claims":   [ { "subject": "...", "predicate": "...", "object": "..." },
+                           { "subject": "...", "predicate": "...", "object": "..." } ],
+          "pred_claims": [ { "subject": "...", "predicate": "...", "object": "..." } ],
+          "pred2gt":     [ { "verdict": "Entailment", "explanation": "..." },
+                           { "verdict": "Neutral",    "explanation": "..." } ],
+          "gt2pred":     [ { "verdict": "Entailment", "explanation": "..." } ] },
         { "id": "1088355", "question": "...", "response": "The passages do not provide ...",
-          "bucket": "abstention_misread", "gt_claims": [], "pred_claims": [ { "claim": "..." } ] }
+          "bucket": "abstention_misread", "gt_claims": [],
+          "pred_claims": [ { "subject": "...", "predicate": "...", "object": "..." } ] }
       ]
     }
   ]
@@ -334,9 +338,14 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
   reason, and `atomicity: null`.
 - `items` lists every attempted item with its `bucket` (`compared`,
   `answer_missed`, `abstention_recognized`, `abstention_misread`,
-  `extraction_error`) and both claim lists. Compared items carry a verdict
-  and explanation per claim (pass 1 on GT claims, pass 2 on predictions);
-  the other buckets never reached the matcher, so their claims are bare.
+  `extraction_error`) and both claim lists as clean `{subject, predicate,
+  object}`, the shape ragcheck writes. Compared items add the verdict cells
+  `{verdict, explanation}` (sparse `error`, `retry`) in two arrays parallel
+  to the claims, named like ragcheck's directions, reference first:
+  `pred2gt` (pass 1, GT claims against the predictions) and `gt2pred`
+  (pass 2). The other buckets never reached the matcher, so they have none.
+  A prediction can be taken into the ground truth exactly as the extractor
+  wrote it.
   Split decisions (`atomicity_splits`) and `duplicate_claims` ride on the
   item they belong to; an errored item carries its `cause`.
 
@@ -352,11 +361,15 @@ item. Empty branches stay present — hidden is not zero.
   "runs": [
     { "_meta": { "...": "...", "run": 1 },
       "findings": {
-        "missed":             [ { "id": "12345", "question": "...", "claim": "...", "verdict": "Neutral", "explanation": "..." } ],
-        "unsupported":        [ { "id": "12345", "question": "...", "claim": "...", "verdict": "Neutral", "explanation": "..." } ],
-        "answer_missed":      [ { "id": "77", "question": "...", "response": "...", "claims": ["..."] } ],
-        "abstention_misread": [ { "id": "1088355", "question": "...", "response": "...", "claims": ["..."] } ],
-        "unjudged":           [ { "id": "...", "question": "...", "claim": "...", "side": "gt", "cause": "checker_failure" } ],
+        "missed":             [ { "id": "12345", "question": "...",
+                                  "claim": { "subject": "...", "predicate": "...", "object": "..." },
+                                  "verdict": "Neutral", "explanation": "...",
+                                  "response": "...", "gt_claims": [ { "subject": "...", ... } ], "pred_claims": [ ... ] } ],
+        "unsupported":        [ { "...": "same shape as missed" } ],
+        "answer_missed":      [ { "id": "77", "question": "...", "response": "...", "claims": [ { "subject": "...", ... } ] } ],
+        "abstention_misread": [ { "id": "1088355", "question": "...", "response": "...", "claims": [ { "subject": "...", ... } ] } ],
+        "unjudged":           [ { "id": "...", "question": "...", "claim": { "subject": "...", ... }, "side": "gt",
+                                  "cause": "checker_failure", "response": "...", "gt_claims": [ ... ], "pred_claims": [ ... ] } ],
         "extraction_failed":  [ { "id": "857956", "question": "...", "cause": "parse_failure" } ]
       } }
   ]
@@ -364,7 +377,12 @@ item. Empty branches stay present — hidden is not zero.
 ```
 
 - `missed` / `unsupported` — the Matching Quality misses, each with the
-  **judged** verdict and the checker's explanation.
+  **judged** verdict, the checker's explanation, and what it is judged
+  against: the response and both claim lists (`gt_claims`, `pred_claims`),
+  as `eval checker` entries carry their chunks. Every claim is
+  `{subject, predicate, object}`, not text as in ragcheck's findings: this
+  queue is reviewed to repair the ground truth, and a missing claim goes in
+  as the triplet the finding names.
 - `unjudged` — a claim the checker never returned a verdict for (`side`
   names the pass). Not a disagreement, but the item stays traceable.
 - `answer_missed` / `abstention_misread` — the ⚪ Abstention Handling
