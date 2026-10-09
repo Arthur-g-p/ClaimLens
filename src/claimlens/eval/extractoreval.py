@@ -38,6 +38,7 @@ from claimlens.utils import (
     retry_of,
 )
 from claimlens.eval.base import Evaluator
+from claimlens.pipelines.directions import _flat_cell, _spo
 from claimlens.services.base import BaseService
 from claimlens.services.checking import CheckingService, mode_label
 from claimlens.services.extraction import ExtractionService
@@ -94,10 +95,10 @@ class _ItemMatchResult:
     false_negatives: list[dict]     # judged misses, pass 1 (one per FN)
     unjudged_gt: list[dict] = field(default_factory=list)    # pass 1 checker failures
     unjudged_pred: list[dict] = field(default_factory=list)  # pass 2 checker failures
-    # The complete record: every claim of each side with its verdict and
-    # explanation — what the per-item ``items`` entry is built from.
-    gt_claims: list[dict] = field(default_factory=list)
-    pred_claims: list[dict] = field(default_factory=list)
+    # The complete record, ragcheck's shape: one verdict cell per claim,
+    # parallel to the item's GT claims (pass 1) and predictions (pass 2).
+    pred2gt: list[dict] = field(default_factory=list)
+    gt2pred: list[dict] = field(default_factory=list)
 
 
 def _bucket_rate(count: int, denominator: int) -> float | None:
@@ -850,8 +851,7 @@ class ExtractorEvaluator(Evaluator):
         service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
         verdict_key = f"{self._checker_model}_checker_verdict"
         explanation_key = f"{self._checker_model}_checker_explanation"
-        error_key = f"{self._checker_model}_checker_error"
-        retry_key = f"{self._checker_model}_checker_retry"
+        namespace = f"{self._checker_model}_checker"
 
         results = []
         for i, item in enumerate(valid_items):
@@ -880,19 +880,6 @@ class ExtractorEvaluator(Evaluator):
             #   precision side: pred triplets entailed by GT      (tp_from_precision)
             # FN/FP derive from the judged misses alone — unjudged claims
             # (checker failure) leave numerator and denominator entirely.
-            def judged(checked: list[dict], originals: list[dict]) -> list[dict]:
-                claims = []
-                for t, o in zip(checked, originals):
-                    claim = {"claim": self._triplet_to_str(o),
-                             "verdict": t.get(verdict_key),
-                             "explanation": t.get(explanation_key)}
-                    if t.get(error_key):
-                        claim["error"] = t[error_key]
-                    if t.get(retry_key):
-                        claim["retry"] = t[retry_key]
-                    claims.append(claim)
-                return claims
-
             results.append(_ItemMatchResult(
                 tp_recall=tp_from_recall,
                 tp_precision=tp_from_precision,
@@ -901,8 +888,8 @@ class ExtractorEvaluator(Evaluator):
                 false_negatives=fn_list,
                 unjudged_gt=unjudged_gt,
                 unjudged_pred=unjudged_pred,
-                gt_claims=judged(pass1_triplets, gt_triplets),
-                pred_claims=judged(pass2_triplets, pred_triplets),
+                pred2gt=[_flat_cell(t, namespace) for t in pass1_triplets],
+                gt2pred=[_flat_cell(t, namespace) for t in pass2_triplets],
             ))
 
         return results
@@ -1031,11 +1018,13 @@ class ExtractorEvaluator(Evaluator):
         item_results: list[_ItemMatchResult],
     ) -> list[dict]:
         """The per-item record: every attempted item with its bucket and
-        both claim lists. Compared items carry a verdict and explanation per
-        claim (pass 1 on GT claims, pass 2 on predictions); the other
-        buckets never reached the matcher, so their claims are bare."""
-        def bare(triplets: list[dict]) -> list[dict]:
-            return [{"claim": self._triplet_to_str(t)} for t in triplets]
+        both claim lists as clean s/p/o, as ragcheck writes them. Compared
+        items add the verdict cells, parallel to the claims and named like
+        ragcheck's directions, reference first: ``pred2gt`` (pass 1, GT
+        claims against the predictions) and ``gt2pred`` (pass 2). The other
+        buckets never reached the matcher, so they have none."""
+        def spo(triplets: list[dict]) -> list[dict]:
+            return [_spo(t) for t in triplets]
 
         def entry(item: dict, i: int, bucket: str, **extra) -> dict:
             return {
@@ -1049,19 +1038,21 @@ class ExtractorEvaluator(Evaluator):
         items: list[dict] = []
         for i, (item, ir) in enumerate(zip(buckets.to_compare, item_results)):
             items.append(entry(item, i, "compared",
-                               gt_claims=ir.gt_claims, pred_claims=ir.pred_claims))
+                               gt_claims=spo(item[self._gt_key]),
+                               pred_claims=spo(item[self._pred_key]),
+                               pred2gt=ir.pred2gt, gt2pred=ir.gt2pred))
         for i, item in enumerate(buckets.answer_missed):
             items.append(entry(item, i, "answer_missed",
-                               gt_claims=bare(item[self._gt_key]), pred_claims=[]))
+                               gt_claims=spo(item[self._gt_key]), pred_claims=[]))
         for i, item in enumerate(buckets.abstention_recognized):
             items.append(entry(item, i, "abstention_recognized",
                                gt_claims=[], pred_claims=[]))
         for i, item in enumerate(buckets.abstention_misread):
             items.append(entry(item, i, "abstention_misread",
-                               gt_claims=[], pred_claims=bare(item[self._pred_key])))
+                               gt_claims=[], pred_claims=spo(item[self._pred_key])))
         for i, item in enumerate(buckets.extraction_error):
             items.append(entry(item, i, "extraction_error",
-                               gt_claims=bare(item.get(self._gt_key) or []),
+                               gt_claims=spo(item.get(self._gt_key) or []),
                                pred_claims=[],
                                cause=item.get(self._error_key, "unknown")))
         return items
@@ -1078,32 +1069,35 @@ class ExtractorEvaluator(Evaluator):
         over the record's items.
 
         A matching entry carries what it is judged against, as the checker
-        eval's carry their chunks: the response and both claim lists."""
+        eval's carry their chunks: the response and both claim lists. Claims
+        stay s/p/o, unlike ragcheck's text: this queue is reviewed to repair
+        the ground truth, and a missing claim goes in as the triplet it names."""
         def classify(item: dict):
             head = {"id": item["id"], "question": item["question"]}
             bucket = item["bucket"]
             if bucket == "compared":
                 against = {"response": item["response"],
-                           "gt_claims": [c["claim"] for c in item["gt_claims"]],
-                           "pred_claims": [c["claim"] for c in item["pred_claims"]]}
-                for side, key, miss in (("gt", "gt_claims", "missed"),
-                                        ("pred", "pred_claims", "unsupported")):
-                    for c in item[key]:
-                        if c["verdict"] is None:
-                            yield "unjudged", {**head, "claim": c["claim"], "side": side,
-                                               "cause": c.get("error", "checker_failure"),
+                           "gt_claims": item["gt_claims"],
+                           "pred_claims": item["pred_claims"]}
+                for side, claims, cells, miss in (
+                        ("gt", "gt_claims", "pred2gt", "missed"),
+                        ("pred", "pred_claims", "gt2pred", "unsupported")):
+                    for claim, cell in zip(item[claims], item[cells]):
+                        if cell["verdict"] is None:
+                            yield "unjudged", {**head, "claim": claim, "side": side,
+                                               "cause": cell.get("error", "checker_failure"),
                                                **against}
-                        elif c["verdict"] != "Entailment":
-                            yield miss, {**head, "claim": c["claim"],
-                                         "verdict": c["verdict"],
-                                         "explanation": c["explanation"], **retry_of(c),
+                        elif cell["verdict"] != "Entailment":
+                            yield miss, {**head, "claim": claim,
+                                         "verdict": cell["verdict"],
+                                         "explanation": cell["explanation"], **retry_of(cell),
                                          **against}
             elif bucket == "answer_missed":
                 yield "answer_missed", {**head, "response": item["response"],
-                                        "claims": [c["claim"] for c in item["gt_claims"]]}
+                                        "claims": item["gt_claims"]}
             elif bucket == "abstention_misread":
                 yield "abstention_misread", {**head, "response": item["response"],
-                                             "claims": [c["claim"] for c in item["pred_claims"]]}
+                                             "claims": item["pred_claims"]}
             elif bucket == "extraction_error":
                 yield "extraction_failed", {**head, "cause": item["cause"]}
 

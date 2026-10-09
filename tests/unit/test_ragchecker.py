@@ -148,7 +148,7 @@ class TestBuildReport:
     def test_structure_and_meta(self, pipeline):
         report = pipeline._build_run([_checked_item()])
         meta = report["_meta"]
-        assert meta["schema_version"] == 5
+        assert meta["schema_version"] == 6
         assert meta["report_type"] == "ragcheck"
         assert meta["evaluated_items"] == 1
         assert meta["dropped_items"] == 0

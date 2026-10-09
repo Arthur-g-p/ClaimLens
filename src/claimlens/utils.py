@@ -259,7 +259,7 @@ def find_duplicate_triplets(
 
 # ── Report envelope ──────────────────────────────────────────────────────────
 
-REPORT_SCHEMA_VERSION = 5
+REPORT_SCHEMA_VERSION = 6
 
 
 def build_meta(

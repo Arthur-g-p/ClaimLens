@@ -12,6 +12,11 @@ from claimlens.eval.extractoreval import (
 from claimlens.exceptions import InvalidInputError
 from claimlens.models import ExtractorEvalResult
 
+# A finding names its claims as s/p/o, the triplet a repair takes over.
+ABC = {"subject": "a", "predicate": "b", "object": "c"}
+DEF = {"subject": "d", "predicate": "e", "object": "f"}
+XYZ = {"subject": "x", "predicate": "y", "object": "z"}
+
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -627,9 +632,8 @@ class TestRetryInFindings:
         item_results = [_ItemMatchResult(
             tp_recall=0, tp_precision=0, fp=1, fn=1,
             false_positives=[], false_negatives=[],
-            gt_claims=[{"claim": "a b c", "verdict": "Neutral", "explanation": "e"}],
-            pred_claims=[{"claim": "x y z", "verdict": "Neutral", "explanation": "e",
-                          "retry": 1}],
+            pred2gt=[{"verdict": "Neutral", "explanation": "e"}],
+            gt2pred=[{"verdict": "Neutral", "explanation": "e", "retry": 1}],
         )]
         findings = ev._build_findings(ev._build_items(buckets, item_results))
         assert findings["unsupported"][0]["retry"] == 1
@@ -653,14 +657,14 @@ class TestUnjudgedInFindings:
             tp_recall=0, tp_precision=1, fp=0, fn=0,
             false_positives=[], false_negatives=[],
             unjudged_gt=[{"gt_triplet": "a b c", "cause": "checker_failure"}],
-            gt_claims=[{"claim": "a b c", "verdict": None, "explanation": None}],
-            pred_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
+            pred2gt=[{"verdict": None, "explanation": None}],
+            gt2pred=[{"verdict": "Entailment", "explanation": "e"}],
         )]
         items = ev._build_items(buckets, item_results)
         findings = ev._build_findings(items)
         assert findings["unjudged"] == [
-            {"id": "u1", "question": "q", "claim": "a b c", "side": "gt", "cause": "checker_failure",
-             "response": "r", "gt_claims": ["a b c"], "pred_claims": ["a b c"]}]
+            {"id": "u1", "question": "q", "claim": ABC, "side": "gt", "cause": "checker_failure",
+             "response": "r", "gt_claims": [ABC], "pred_claims": [ABC]}]
         assert findings["missed"] == [] and findings["unsupported"] == []
 
     def test_perfect_match_is_in_items_but_not_in_findings(self):
@@ -674,11 +678,16 @@ class TestUnjudgedInFindings:
         item_results = [_ItemMatchResult(
             tp_recall=1, tp_precision=1, fp=0, fn=0,
             false_positives=[], false_negatives=[],
-            gt_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
-            pred_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
+            pred2gt=[{"verdict": "Entailment", "explanation": "e"}],
+            gt2pred=[{"verdict": "Entailment", "explanation": "e"}],
         )]
         items = ev._build_items(buckets, item_results)
         assert [i["bucket"] for i in items] == ["compared"]
+        # ragcheck's shape: clean s/p/o claims, verdict cells in parallel arrays
+        assert items[0]["gt_claims"] == items[0]["pred_claims"] == [
+            {"subject": "a", "predicate": "b", "object": "c"}]
+        assert items[0]["pred2gt"] == items[0]["gt2pred"] == [
+            {"verdict": "Entailment", "explanation": "e"}]
         assert all(v == [] for v in ev._build_findings(items).values())
 
     async def test_matching_keeps_the_checker_error_cause(self):
@@ -711,14 +720,13 @@ class TestUnjudgedInFindings:
                                          _make_canonical_triplet("late", "x", "y")])
         with patch("claimlens.eval.extractoreval.CheckingService", FakeService):
             [result] = await ev._match_all_llm([item])
-        assert result.gt_claims == [
-            {"claim": "a b c", "verdict": "Entailment", "explanation": "e"},
-            {"claim": "bad x y", "verdict": None, "explanation": None,
-             "error": "context_too_long"},
+        assert result.pred2gt == [
+            {"verdict": "Entailment", "explanation": "e"},
+            {"verdict": None, "explanation": None, "error": "context_too_long"},
         ]
-        assert "error" not in result.pred_claims[0]
-        assert result.pred_claims[1]["retry"] == 2
-        assert "retry" not in result.pred_claims[0]
+        assert "error" not in result.gt2pred[0]
+        assert result.gt2pred[1]["retry"] == 2
+        assert "retry" not in result.gt2pred[0]
 
     def test_unjudged_finding_names_the_real_cause(self):
         ev = _evaluator()
@@ -733,15 +741,14 @@ class TestUnjudgedInFindings:
             tp_recall=0, tp_precision=1, fp=0, fn=0,
             false_positives=[], false_negatives=[],
             unjudged_gt=[{"gt_triplet": "a b c", "cause": "checker_failure"}],
-            gt_claims=[{"claim": "a b c", "verdict": None, "explanation": None,
-                        "error": "context_too_long"}],
-            pred_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
+            pred2gt=[{"verdict": None, "explanation": None, "error": "context_too_long"}],
+            gt2pred=[{"verdict": "Entailment", "explanation": "e"}],
         )]
         findings = ev._build_findings(ev._build_items(buckets, item_results))
         assert findings["unjudged"] == [
-            {"id": "u2", "question": "q", "claim": "a b c", "side": "gt",
+            {"id": "u2", "question": "q", "claim": ABC, "side": "gt",
              "cause": "context_too_long", "response": "r",
-             "gt_claims": ["a b c"], "pred_claims": ["a b c"]}]
+             "gt_claims": [ABC], "pred_claims": [ABC]}]
 
 
 
@@ -824,8 +831,8 @@ class TestItemsAndFindings:
         )
         results = [_ItemMatchResult(
             tp_recall=1, tp_precision=1, fp=0, fn=0, false_positives=[], false_negatives=[],
-            gt_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}],
-            pred_claims=[{"claim": "a b c", "verdict": "Entailment", "explanation": "e"}])]
+            pred2gt=[{"verdict": "Entailment", "explanation": "e"}],
+            gt2pred=[{"verdict": "Entailment", "explanation": "e"}])]
         items = ev._build_items(buckets, results)
         assert len(items) == 1
         assert all(v == [] for v in ev._build_findings(items).values())
@@ -843,19 +850,19 @@ class TestItemsAndFindings:
             tp_recall=0, tp_precision=0, fp=1, fn=1,
             false_positives=[{"pred_triplet": "x y z", "verdict": "Neutral", "reason": "r"}],
             false_negatives=[{"gt_triplet": "a b c", "verdict": "Neutral", "reason": "r"}],
-            gt_claims=[{"claim": "a b c", "verdict": "Neutral", "explanation": "no match"}],
-            pred_claims=[{"claim": "x y z", "verdict": "Neutral", "explanation": "no match"}])]
+            pred2gt=[{"verdict": "Neutral", "explanation": "no match"}],
+            gt2pred=[{"verdict": "Neutral", "explanation": "no match"}])]
         items = ev._build_items(buckets, results)
         findings = ev._build_findings(items)
         assert list(findings) == ["missed", "unsupported", "answer_missed",
                                   "abstention_misread", "unjudged", "extraction_failed"]
         # each carries what it is judged against: the response and both claim lists
-        both = {"response": "r", "gt_claims": ["a b c"], "pred_claims": ["x y z"]}
+        both = {"response": "r", "gt_claims": [ABC], "pred_claims": [XYZ]}
         assert findings["missed"] == [
-            {"id": "test", "question": "q", "claim": "a b c", "verdict": "Neutral", "explanation": "no match",
+            {"id": "test", "question": "q", "claim": ABC, "verdict": "Neutral", "explanation": "no match",
              **both}]
         assert findings["unsupported"] == [
-            {"id": "test", "question": "q", "claim": "x y z", "verdict": "Neutral", "explanation": "no match",
+            {"id": "test", "question": "q", "claim": XYZ, "verdict": "Neutral", "explanation": "no match",
              **both}]
 
     def test_abstention_misread_findings(self):
@@ -870,10 +877,10 @@ class TestItemsAndFindings:
         )
         items = ev._build_items(buckets, [])
         assert items[0]["bucket"] == "abstention_misread"
-        assert items[0]["pred_claims"] == [{"claim": "a b c"}]
+        assert items[0]["pred_claims"] == [{"subject": "a", "predicate": "b", "object": "c"}]
         findings = ev._build_findings(items)
         assert findings["abstention_misread"] == [
-            {"id": "test", "question": "q", "response": "r", "claims": ["a b c"]}]
+            {"id": "test", "question": "q", "response": "r", "claims": [ABC]}]
 
     def test_answer_missed_findings(self):
         ev = _evaluator()
@@ -888,7 +895,7 @@ class TestItemsAndFindings:
         items = ev._build_items(buckets, [])
         findings = ev._build_findings(items)
         assert findings["answer_missed"] == [
-            {"id": "test", "question": "q", "response": "r", "claims": ["a b c", "d e f"]}]
+            {"id": "test", "question": "q", "response": "r", "claims": [ABC, DEF]}]
 
     def test_recognized_abstention_is_in_items_only(self):
         ev = _evaluator()
@@ -983,7 +990,7 @@ class TestEvaluateIntegration:
         assert run["counts"]["abstention_handling"]["answers_missed"] == 1
         queue = findings["runs"][0]["findings"]
         assert queue["answer_missed"] == [
-            {"id": "1", "question": "q", "response": "r", "claims": ["a b c", "d e f"]}]
+            {"id": "1", "question": "q", "response": "r", "claims": [ABC, DEF]}]
 
     def test_abstention_misread_from_extraction(self):
         """GT is an explicit empty list (nothing to extract) but extraction
@@ -1025,7 +1032,7 @@ class TestEvaluateIntegration:
         assert sorted(i["bucket"] for i in run["items"]) == ["abstention_misread", "abstention_recognized"]
         queue = findings["runs"][0]["findings"]
         assert queue["abstention_misread"] == [
-            {"id": "1", "question": "q", "response": "r", "claims": ["x y z"]}]
+            {"id": "1", "question": "q", "response": "r", "claims": [XYZ]}]
 
 
 # ── Smoke: the full EXTRACTOR EVAL print path ────────────────────────────────
