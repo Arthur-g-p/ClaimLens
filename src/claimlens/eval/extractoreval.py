@@ -165,12 +165,15 @@ class ExtractorEvaluator(Evaluator):
         atomizer_model: str | None = None,
         atomizer_base_url: str | None = None,
         runs: int = 1,
+        # Items carrying this key (truthy) are left out: not extracted, not matched
+        skip_marked: str | None = None,
     ):
         if not checker_model:
             raise ValueError("checker_model is required for evaluation matching.")
 
         self._extractor_model = extractor_model
         self._gt_key = gt_key
+        self._skip_marked = skip_marked
         # runs > 1 = variance mode: the evaluator repeats itself; the
         # controller only passes the number through.
         self._runs = max(1, runs)
@@ -374,6 +377,7 @@ class ExtractorEvaluator(Evaluator):
         counts = {
             # 📂 Data
             "data": {
+                "skipped_marked": getattr(self, "_skipped_marked", 0),
                 "dropped_no_response": getattr(self, "_dropped_missing_response", 0),
                 "dropped_no_gt_key": getattr(self, "_dropped_missing_gt", 0),
                 "gt_empty": getattr(self, "_gt_empty", 0),
@@ -537,7 +541,9 @@ class ExtractorEvaluator(Evaluator):
 
     def _validate(self, data: list[dict]) -> list[dict]:
         """Fail-fast validation: an item needs a response to extract from
-        and a GT key to be judged against.
+        and a GT key to be judged against. With ``skip_marked``, an item that
+        carries that key is left out first: it stays in the file, marked, but
+        is neither extracted nor matched (e.g. a response cut as out of scope).
 
         Absent or null GT key = missing data → dropped (the same rule as
         ragcheck's gt_answer: absent is missing, an explicit empty is data).
@@ -548,10 +554,14 @@ class ExtractorEvaluator(Evaluator):
         and caught before any LLM call.
         """
         valid = []
+        self._skipped_marked = 0
         self._dropped_missing_response = 0
         self._dropped_missing_gt = 0
 
         for item in data:
+            if self._skip_marked and item.get(self._skip_marked):
+                self._skipped_marked += 1
+                continue
             if not item.get("response"):
                 self._dropped_missing_response += 1
                 continue
@@ -562,7 +572,7 @@ class ExtractorEvaluator(Evaluator):
         self._gt_empty = sum(1 for item in valid if not item[self._gt_key])
 
         if not valid:
-            with_response = len(data) - self._dropped_missing_response
+            with_response = len(data) - self._skipped_marked - self._dropped_missing_response
             if with_response and self._dropped_missing_gt == with_response:
                 raise InvalidInputError(
                     f"No ground truth found: none of the {with_response} "
@@ -573,7 +583,8 @@ class ExtractorEvaluator(Evaluator):
                 )
             raise InvalidInputError(
                 f"No evaluable items. All {len(data)} items dropped "
-                f"(missing_response={self._dropped_missing_response}, "
+                f"(skipped_marked={self._skipped_marked}, "
+                f"missing_response={self._dropped_missing_response}, "
                 f"missing_gt={self._dropped_missing_gt})."
             )
 
@@ -1115,6 +1126,9 @@ class ExtractorEvaluator(Evaluator):
         logger.info("    Total:        %d items", total)
         no_response = getattr(self, "_dropped_missing_response", dropped)
         no_gt = getattr(self, "_dropped_missing_gt", 0)
+        skipped = getattr(self, "_skipped_marked", 0)
+        if skipped > 0:
+            logger.info("     ├─ skipped:  %d  (marked '%s')", skipped, self._skip_marked)
         if no_response > 0:
             logger.info("     ├─ dropped:  %d  (missing response)", no_response)
         if no_gt > 0:

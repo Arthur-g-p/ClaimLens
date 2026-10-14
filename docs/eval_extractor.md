@@ -228,6 +228,7 @@ claimlens eval extractor <input_file> [options]
 | **Joint Bundle Size** | `--joint-num` | `10` | Max claims bundled per joint matching call. |
 | **Word Budget** | `--max-words` | `None` | Word budget per matching call. |
 | **Runs** | `--runs` | `1` | Repeat the whole eval N times and report variance (N × LLM cost). |
+| **Skip Marked** | `--skip-marked` | `None` | Leave out every item that carries this key, e.g. `cut`: not extracted, not matched, counted as `skipped_marked` in `counts.data`. The item stays in the input file. |
 | **Concurrency** | `--concurrency` | `10` | Max simultaneous LLM requests per client. |
 | **Debug Mode** | `--debug` | `False` | Timestamps + module names in logs. |
 

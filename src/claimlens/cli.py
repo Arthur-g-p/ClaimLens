@@ -724,6 +724,10 @@ def eval_extractor(
     runs: int = typer.Option(
         1, "--runs", help="Repeat the whole eval N times and report variance (N x LLM cost)."
     ),
+    skip_marked: str = typer.Option(
+        None, "--skip-marked",
+        help="Leave out items that carry this key (e.g. 'cut'): not extracted, not matched, counted as skipped.",
+    ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug output.",
@@ -762,6 +766,7 @@ def eval_extractor(
             atomizer_model=atomizer_model,
             atomizer_base_url=atomizer_base_api,
             runs=runs,
+            skip_marked=skip_marked,
         )
         record, findings = evaluator.run_sync(data)
         _args = _capture_args(ctx, "eval extractor")

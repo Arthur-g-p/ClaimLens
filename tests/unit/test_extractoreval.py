@@ -106,6 +106,22 @@ class TestValidate:
         valid = ev._validate(data)
         assert len(valid) == 1
 
+    def test_marked_items_skipped(self):
+        """skip_marked leaves marked items out before anything else."""
+        ev = _evaluator(skip_marked="cut")
+        cut = _make_item(gt_triplets=[_make_triplet("a", "b", "c")], item_id="cut")
+        cut["cut"] = ["D-011 absence"]
+        data = [cut, _make_item(gt_triplets=[_make_triplet("a", "b", "c")])]
+        valid = ev._validate(data)
+        assert [i["id"] for i in valid] == ["test"]
+        assert ev._skipped_marked == 1
+
+    def test_marked_items_kept_without_skip_marked(self):
+        ev = _evaluator()
+        cut = _make_item(gt_triplets=[_make_triplet("a", "b", "c")])
+        cut["cut"] = ["D-011 absence"]
+        assert len(ev._validate([cut])) == 1
+
     def test_missing_response_dropped(self):
         ev = _evaluator()
         data = [
