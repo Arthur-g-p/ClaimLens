@@ -124,7 +124,7 @@ works.
 every other request waits. On the first success the level is locked and stored
 in a process-wide cache keyed by `(base_url, model)`, and recorded per model as
 `request_strategies` in the `_meta` of every envelope report (refcheck, ragcheck,
-faithcheck, both evals — not extract/check/atomize), next to `usage`, the run's
+faithcheck, compare, both evals — not extract/check/atomize), next to `usage`, the run's
 request and token counts. `requests` there counts every HTTP call, tokens only
 exist for calls that answered — a timeout is a request with no tokens. Every later request —
 and every other worker pointed at the same endpoint — starts there with zero
@@ -221,6 +221,84 @@ Unknown                        → RETRY
 
 ---
 
+## Prompt caching
+
+On by default, on both paths, with no setting per endpoint. `--no-prompt-cache`
+switches it off (from Python: `prompt_cache=False`, like `concurrency=`).
+
+**What is sent.** The last system message gets one marker on its last text
+block, and a string content becomes one text block:
+
+```json
+{"role": "system", "content": [
+  {"type": "text", "text": "<fixed instructions>", "cache_control": {"type": "ephemeral"}}
+]}
+```
+
+Providers with explicit caching (Claude, Gemini, Qwen behind OpenRouter) cache
+the prompt up to and including that block. `ephemeral` is the only cache type:
+the entry expires about 5 minutes after its last use. Providers that cache on
+their own (OpenAI, DeepSeek, Moonshot, vLLM, SGLang, Ollama) ignore the field.
+They match the longest stored prefix, so only a system message that is
+identical on every request can hit. The item's text belongs after it.
+
+**The marker cannot break a run.** If a marked request gets a 400 while the
+endpoint is still unknown, the same request is re-sent without the marker. If
+that succeeds, the endpoint rejects the marker: it is never sent there again
+in this process, and one line says so. If it fails too, the marker was not
+the cause and the error is handled as usual.
+
+**What is read.** Only the OpenAI-standard field
+`usage.prompt_tokens_details.cached_tokens`. Anything else shows as *cache
+use not reported by endpoint* (the endpoint may still cache), and the run
+carries on. Known cases:
+
+| Endpoint | What you see |
+| --- | --- |
+| OpenRouter, OpenAI | the cache read |
+| vLLM | caches, reports only when the server runs with `--enable-prompt-tokens-details` |
+| SGLang | caches, reports only when the server runs with `--enable-cache-report` |
+| Ollama | caches while the model stays loaded, reports nothing |
+| DeepSeek direct | caches, reports under its own field names, so not reported |
+| Claude direct (its OpenAI-compatible endpoint) | does not cache at all; use Claude through OpenRouter or LiteLLM (`anthropic/...`) |
+
+**What you see.**
+
+- The first marked request of each task estimates the size of the fixed part
+  (about 4 characters per token) and prints it only when it is below 1,024
+  tokens: most providers cache nothing that short, Claude 5 models nothing
+  below 512. Above that, the estimate shows under `--debug`.
+- While the calls run, only events print, never a share: the first hit, a
+  warning if none of the first 20 answers hit, and a warning if a cache that
+  was hitting then misses 20 times in a row (usually a provider switch or an
+  expired entry). An endpoint that does not report cache use says so once, on
+  the first answer. A cache can start late: the first requests go out before
+  anything is stored.
+- The token table at the end shows each command's cache read:
+  `extract:  40 reqs · 312,400 in (298,100 cache read · 95%) · ...`. The
+  report's `_meta.usage` carries `cached_tokens`, which is `null` when no
+  response reported it.
+
+**What it costs.** A write happens when the prefix is not stored yet. A hit
+reads it and restarts its expiry. Claude bills a write at 1.25× the input
+price and a read at 0.1×. OpenAI bills no extra for writes.
+
+## OpenRouter: which provider answers
+
+OpenRouter serves most models from several providers and may send consecutive
+requests to different ones. Each provider keeps its own prompt cache, so a
+request that lands on another provider starts cold and the cache misses.
+
+To keep a model on one provider, set **allowed providers** in your OpenRouter
+account settings. It applies to every request made with that key, for every
+model, and needs no ClaimLens flag. A model string cannot pin a provider: the
+`:nitro` and `:floor` suffixes only sort by speed or price.
+
+The response names the provider that served it, as `"provider": "DeepSeek"`
+next to `model`.
+
+---
+
 ## What you can set
 
 Environment variables, read once at import (`.env` is loaded automatically):
@@ -240,6 +318,7 @@ CLI flags, per command:
 | `--concurrency` | `10` | Simultaneous requests **per LLM client**. An extractor and a checker each get their own. |
 | `--joint-num` | `10` | Max claims per joint checker call. |
 | `--max-words` | `6000` joint, unset single | Word budget per call. If one reference fills the budget alone, the service falls back to one claim per call. |
+| `--prompt-cache/--no-prompt-cache` | on | Send the prompt-cache marker. See [Prompt caching](#prompt-caching). |
 
 ### Set the timeout high
 

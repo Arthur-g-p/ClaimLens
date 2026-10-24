@@ -159,6 +159,7 @@ class ExtractorEvaluator(Evaluator):
         checker_model: str | None = None,
         checker_base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
         # Atomicity axis (optional, orthogonal to coverage)
@@ -202,6 +203,7 @@ class ExtractorEvaluator(Evaluator):
             model=extractor_model,
             base_url=extractor_base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             verbosity="silent" if self._runs > 1 else "compact",
             dedup=False,
         )
@@ -210,6 +212,7 @@ class ExtractorEvaluator(Evaluator):
         self._checker_model = checker_model
         self._checker_base_url = checker_base_url
         self._concurrency = concurrency
+        self._prompt_cache = prompt_cache
         self._joint_num = joint_num
         self._max_words = max_words
 
@@ -230,6 +233,7 @@ class ExtractorEvaluator(Evaluator):
                 source_kg_key=self._pred_key,
                 base_url=atomizer_base_url,
                 concurrency=concurrency,
+                prompt_cache=prompt_cache,
                 verbosity="silent" if self._runs > 1 else "compact",
             )
 
@@ -822,6 +826,7 @@ class ExtractorEvaluator(Evaluator):
             extractor_model=_INTERNAL_EXT_MODEL,
             base_url=self._checker_base_url,
             concurrency=self._concurrency,
+            prompt_cache=self._prompt_cache,
             joint=True,
             joint_num=self._joint_num,
             max_words=self._max_words,
@@ -848,6 +853,7 @@ class ExtractorEvaluator(Evaluator):
             extractor_model=_INTERNAL_EXT_MODEL,
             base_url=self._checker_base_url,
             concurrency=self._concurrency,
+            prompt_cache=self._prompt_cache,
             joint=True,
             joint_num=self._joint_num,
             max_words=self._max_words,

@@ -34,7 +34,8 @@ class TestDelta:
     def test_nothing_happened_gives_zero_and_no_phases(self):
         before = GLOBAL_STATS.snapshot()
         assert usage_since(before) == {"requests": 0, "input_tokens": 0,
-                                       "output_tokens": 0, "reasoning_tokens": 0}
+                                       "output_tokens": 0, "reasoning_tokens": 0,
+                                       "cached_tokens": None}
 
     def test_phase_untouched_since_snapshot_is_omitted(self):
         _bump("atomize", 4, 50)
@@ -66,6 +67,79 @@ class TestSum:
         """Older run docs (and the fake reports in test_runs) carry no usage."""
         assert sum_usage([None, {}, {"requests": 1, "input_tokens": 2,
                                      "output_tokens": 3, "reasoning_tokens": 0}])["requests"] == 1
+
+
+class TestCachedTokens:
+    """Prompt-cache reads: the standard field only, null when unknown, never 0."""
+
+    def _answer(self, phase: str, usage: dict):
+        GLOBAL_STATS.set_phase(phase)
+        GLOBAL_STATS.log_request()
+        GLOBAL_STATS.update(usage)
+
+    def test_reported_reads_are_summed_per_phase(self):
+        before = GLOBAL_STATS.snapshot()
+        for cached in (0, 900):
+            self._answer("extract", {"prompt_tokens": 1000, "completion_tokens": 1,
+                                     "prompt_tokens_details": {"cached_tokens": cached}})
+        u = usage_since(before)
+        assert u["cached_tokens"] == 900
+        assert u["phases"]["extract"]["cached_tokens"] == 900
+
+    def test_a_reported_miss_is_zero(self):
+        before = GLOBAL_STATS.snapshot()
+        self._answer("check", {"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": 0}})
+        assert usage_since(before)["cached_tokens"] == 0
+
+    @pytest.mark.parametrize("usage", [
+        {"prompt_tokens": 10},                                              # no details (Ollama)
+        {"prompt_tokens": 10, "prompt_tokens_details": None},               # null details
+        {"prompt_tokens": 10, "prompt_tokens_details": {}},                 # empty (Anthropic compat)
+        {"prompt_tokens": 10, "prompt_cache_hit_tokens": 8},                # DeepSeek-direct naming
+        {"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": "8"}},
+        {"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": True}},
+        {"prompt_tokens": 10, "prompt_tokens_details": "garbage"},
+    ])
+    def test_anything_else_is_unknown_not_zero(self, usage):
+        before = GLOBAL_STATS.snapshot()
+        self._answer("check", usage)
+        u = usage_since(before)
+        assert u["cached_tokens"] is None
+        assert u["input_tokens"] == 10            # the rest of the tally is untouched
+
+    def test_sum_keeps_null_unless_a_run_reported(self):
+        base = {"requests": 1, "input_tokens": 10, "output_tokens": 1, "reasoning_tokens": 0}
+        assert sum_usage([{**base, "cached_tokens": None}] * 2)["cached_tokens"] is None
+        assert sum_usage([{**base, "cached_tokens": None}, {**base, "cached_tokens": 7}])["cached_tokens"] == 7
+
+
+class TestTokenTable:
+    """The 📊 Tokens line per command carries the cache read, or says it can't."""
+
+    def _line(self, caplog, phase: str) -> str:
+        from claimlens.stats import log_token_stats
+        caplog.clear()
+        with caplog.at_level("INFO"):
+            log_token_stats()
+        return next(r.getMessage() for r in caplog.records if f" {phase}:" in r.getMessage())
+
+    def test_cache_read_with_percent(self, caplog):
+        GLOBAL_STATS.set_phase("tt_hit")
+        GLOBAL_STATS.log_request()
+        GLOBAL_STATS.update({"prompt_tokens": 1000, "completion_tokens": 5,
+                             "prompt_tokens_details": {"cached_tokens": 900}})
+        assert "1,000 in (900 cache read · 90%) · 5 out" in self._line(caplog, "tt_hit")
+
+    def test_not_reported(self, caplog):
+        GLOBAL_STATS.set_phase("tt_unknown")
+        GLOBAL_STATS.log_request()
+        GLOBAL_STATS.update({"prompt_tokens": 1000, "completion_tokens": 5})
+        assert "1,000 in (cache use not reported by endpoint) · 5 out" in self._line(caplog, "tt_unknown")
+
+    def test_no_answered_tokens_says_nothing_about_cache(self, caplog):
+        GLOBAL_STATS.set_phase("tt_silent")
+        GLOBAL_STATS.log_request()                 # a timeout: request, no usage
+        assert "0 in · 0 out" in self._line(caplog, "tt_silent")
 
 
 class TestWiring:

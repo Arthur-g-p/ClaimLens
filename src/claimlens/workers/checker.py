@@ -125,6 +125,7 @@ class Checker:
         model: str,
         base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         retry_rounds: list[RetryRoundConfig] | None = None,
         joint_prompt_key: str | None = None,
     ):
@@ -134,6 +135,7 @@ class Checker:
             model=model,
             base_url=base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
         )
         self._prompt_template = settings.PROMPTS["checker_prompt"]
         joint_key = joint_prompt_key or "checker_prompt_joint"

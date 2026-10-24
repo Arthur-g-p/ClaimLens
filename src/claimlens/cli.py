@@ -137,6 +137,7 @@ def extract(
     extractor_base_api: str = typer.Option(None, "--extractor-base-api", help="Optional base URL for the LLM API."),
     dedup: bool = typer.Option(True, "--dedup/--no-dedup", help="Remove exact (s,p,o) duplicate triplets from the output. On by default (loss-free cleanup)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run the extraction pipeline on a JSON dataset."""
@@ -161,7 +162,7 @@ def extract(
 
     # Call service
     try:
-        service = ExtractionService(model=model, base_url=extractor_base_api, dedup=dedup, concurrency=concurrency)
+        service = ExtractionService(model=model, base_url=extractor_base_api, dedup=dedup, concurrency=concurrency, prompt_cache=prompt_cache)
         result = service.run_sync(data)
     except ClaimLensError as exc:
         logger.error("")
@@ -184,6 +185,7 @@ def check(
     joint_num: int = typer.Option(settings.DEFAULT_JOINT_NUM, "--joint-num", help="Max claims per joint LLM call."),
     max_words: int = typer.Option(None, "--max-words", help="Word budget per LLM call. Default: 6000 in joint mode, unset in single."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Check extracted claims against reference passages."""
@@ -210,6 +212,7 @@ def check(
     try:
         service = CheckingService(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             model=model,
             extractor_model=extractor_model,
             base_url=checker_base_api,
@@ -238,6 +241,7 @@ def atomize(
     dedup: bool = typer.Option(True, "--dedup/--no-dedup", help="Remove exact duplicate claims from the atomized output (e.g. a split reproducing an existing fact). On by default (loss-free)."),
     trace: bool = typer.Option(True, "--trace/--no-trace", help="Also write a per-triplet decision trace to {output}_decisions.json."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Atomize compound triplets into atomic facts."""
@@ -264,6 +268,7 @@ def atomize(
     try:
         service = AtomizationService(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             model=model,
             source_kg_key=source_kg_key,
             base_url=atomizer_base_api,
@@ -303,6 +308,7 @@ def refcheck(
     joint_num: int = typer.Option(settings.DEFAULT_JOINT_NUM, "--joint-num", help="Max claims per joint LLM call."),
     max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run RefChecker: extraction + checking in one pass, one output document."""
@@ -329,6 +335,7 @@ def refcheck(
     try:
         pipeline = RefCheckerPipeline(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -374,6 +381,7 @@ def ragcheck(
     max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run RagChecker: 2 extractions + 4 checking directions, one report file."""
@@ -399,6 +407,7 @@ def ragcheck(
     try:
         pipeline = RagCheckerPipeline(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -447,6 +456,7 @@ def faithcheck(
     max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run faithfulness checking without ground truth: response claims vs retrieved context."""
@@ -472,6 +482,7 @@ def faithcheck(
     try:
         pipeline = FaithfulnessPipeline(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -520,6 +531,7 @@ def compare(
     max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Compare two texts claim by claim, both ways: each text's claims checked against the other text."""
@@ -545,6 +557,7 @@ def compare(
     try:
         pipeline = ComparePipeline(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -618,6 +631,7 @@ def eval_checker(
         1, "--runs", help="Repeat the whole eval N times and report variance (N x LLM cost)."
     ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug output."
     ),
@@ -645,6 +659,7 @@ def eval_checker(
     try:
         evaluator = CheckerEvaluator(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             checker_model=checker_model,
             gt_key=gt_key,
             checker_base_url=checker_base_api,
@@ -729,6 +744,7 @@ def eval_extractor(
         help="Leave out items that carry this key (e.g. 'cut'): not extracted, not matched, counted as skipped.",
     ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
+    prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug output.",
     ),
@@ -756,6 +772,7 @@ def eval_extractor(
     try:
         evaluator = ExtractorEvaluator(
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             extractor_model=extractor_model,
             gt_key=gt_key,
             extractor_base_url=extractor_base_api,

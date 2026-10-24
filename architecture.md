@@ -38,12 +38,15 @@ CLI (controllers)  →  Pipelines / Services (orchestration)  →  Workers (exec
   eval result dataclasses).
 - `llmclient.py` — shared LLM client (top-level, not in workers/). Owns
   connection preflight, response-format strategy discovery + process-level
-  caching, and drop-params handling. Per-item errors (ContextTooLong,
+  caching, drop-params handling, and the prompt-cache marker (probed like
+  drop_params, plus the live cache lines). Per-item errors (ContextTooLong,
   ContentPolicy, parse) are returned as *values* in the batch result list;
   fatal errors (auth, connection, budget) propagate.
   See docs/request_strategies.md.
 - `stats.py` — `PhaseStats` (per-batch outcomes incl. per-index
-  `error_causes`), `RoundResult`, global `TokenStats`, shared log helpers.
+  `error_causes`), `RoundResult`, global `TokenStats` (incl. prompt-cache
+  reads via `cached_tokens()`, the one reader of the usage field), shared
+  log helpers.
 
 ## Service vs Pipeline vs Worker vs Direction — the definitions
 

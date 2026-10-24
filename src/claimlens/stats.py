@@ -73,15 +73,29 @@ class PhaseStats:
         return self.total_permanent
 
 
+def cached_tokens(usage) -> int | None:
+    """Input tokens read from the prompt cache, from one response's usage.
+
+    Only the OpenAI-standard field usage.prompt_tokens_details.cached_tokens is
+    read. None = the endpoint does not report it in that form ("not
+    reported"); 0 = it reports a miss. Never raises, whatever the endpoint sends.
+    """
+    details = usage.get("prompt_tokens_details") if isinstance(usage, dict) else None
+    cached = details.get("cached_tokens") if isinstance(details, dict) else None
+    return cached if isinstance(cached, int) and not isinstance(cached, bool) else None
+
+
 @dataclass
 class TokenStats:
     input_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_tokens: int = 0     # input tokens read from the prompt cache
+    cache_reported: int = 0    # responses whose usage reported cached_tokens at all
     total_requests: int = 0
     total_errors: int = 0
 
-    # Per-phase breakdown: phase_name -> {input, output, reasoning, requests, errors}
+    # Per-phase breakdown: phase_name -> {input, output, reasoning, cached, requests, errors}
     _phases: dict = field(default_factory=dict)
     _current_phase: str = "default"
 
@@ -98,6 +112,7 @@ class TokenStats:
             if phase not in self._phases:
                 self._phases[phase] = {
                     "input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
+                    "cached_tokens": 0, "cache_reported": 0,
                     "requests": 0, "errors": 0
                 }
 
@@ -117,9 +132,14 @@ class TokenStats:
                 elif hasattr(details, 'reasoning_tokens'):
                     reasoning = details.reasoning_tokens or 0
 
+            cached = cached_tokens(usage)
+            reported = cached is not None
+
             self.input_tokens += inp
             self.output_tokens += out
             self.reasoning_tokens += reasoning
+            self.cached_tokens += cached or 0
+            self.cache_reported += reported
 
             # Update phase stats
             if self._current_phase in self._phases:
@@ -127,6 +147,8 @@ class TokenStats:
                 p["input_tokens"] += inp
                 p["output_tokens"] += out
                 p["reasoning_tokens"] += reasoning
+                p["cached_tokens"] += cached or 0
+                p["cache_reported"] += reported
 
     def record_strategy(self, model: str, endpoint: str | None, strategy: str):
         """Remember which request strategy a model locked, for report _meta."""
@@ -172,6 +194,8 @@ class TokenStats:
                 "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens,
                 "reasoning_tokens": self.reasoning_tokens,
+                "cached_tokens": self.cached_tokens,
+                "cache_reported": self.cache_reported,
                 "total_requests": self.total_requests,
                 "total_errors": self.total_errors,
             }
@@ -211,11 +235,14 @@ def usage_since(before: dict | None) -> dict:
         before = now
 
     def _delta(a: dict, b: dict, requests_key: str) -> dict:
+        reported = a.get("cache_reported", 0) - b.get("cache_reported", 0)
         return {
             "requests": a.get(requests_key, 0) - b.get(requests_key, 0),
             "input_tokens": a.get("input_tokens", 0) - b.get("input_tokens", 0),
             "output_tokens": a.get("output_tokens", 0) - b.get("output_tokens", 0),
             "reasoning_tokens": a.get("reasoning_tokens", 0) - b.get("reasoning_tokens", 0),
+            # null, not 0, when no response reported it: unknown is not a miss
+            "cached_tokens": (a.get("cached_tokens", 0) - b.get("cached_tokens", 0)) if reported else None,
         }
 
     usage = _delta(now, before, "total_requests")
@@ -231,17 +258,23 @@ def usage_since(before: dict | None) -> dict:
 
 def sum_usage(usages: list[dict | None]) -> dict:
     """Add per-run usage blocks into one — for the outer _meta of a --runs report."""
-    total = {k: 0 for k in _USAGE_KEYS}
+    def _add(acc: dict, u: dict) -> None:
+        for k in _USAGE_KEYS:
+            acc[k] += u.get(k, 0)
+        if u.get("cached_tokens") is not None:  # stays null if no run reported it
+            acc["cached_tokens"] = (acc["cached_tokens"] or 0) + u["cached_tokens"]
+
+    def _empty() -> dict:
+        return {**{k: 0 for k in _USAGE_KEYS}, "cached_tokens": None}
+
+    total = _empty()
     phases: dict[str, dict] = {}
     for u in usages:
         if not u:
             continue
-        for k in _USAGE_KEYS:
-            total[k] += u.get(k, 0)
+        _add(total, u)
         for name, p in u.get("phases", {}).items():
-            acc = phases.setdefault(name, {k: 0 for k in _USAGE_KEYS})
-            for k in _USAGE_KEYS:
-                acc[k] += p.get(k, 0)
+            _add(phases.setdefault(name, _empty()), p)
     if phases:
         total["phases"] = phases
     return total
@@ -678,9 +711,15 @@ def log_token_stats() -> None:
 
     active = [(name, p) for name, p in phases.items() if p["requests"] > 0]
     for i, (phase, p) in enumerate(active):
+        inp = f"{p['input_tokens']:,} in"
+        if p.get("cache_reported"):
+            pct = round(100 * p["cached_tokens"] / p["input_tokens"]) if p["input_tokens"] else 0
+            inp += f" ({p['cached_tokens']:,} cache read · {pct}%)"
+        elif p["input_tokens"]:
+            inp += " (cache use not reported by endpoint)"
         parts = [
             f"{p['requests']} reqs",
-            f"{p['input_tokens']:,} in",
+            inp,
             f"{p['output_tokens']:,} out",
         ]
         if p.get("reasoning_tokens"):

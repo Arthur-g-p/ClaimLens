@@ -77,6 +77,7 @@ class ExtractionService(BaseService):
         model: str,
         base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         verbosity: str = "full",
         section_label: str | None = None,
         dedup: bool = True,
@@ -111,6 +112,7 @@ class ExtractionService(BaseService):
             model=model,
             base_url=base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
         )
 
         self._init_verbosity(verbosity, section_label)

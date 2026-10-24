@@ -22,7 +22,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from pydantic import ValidationError
 
-from claimlens.stats import GLOBAL_STATS
+from claimlens.stats import GLOBAL_STATS, cached_tokens
 from claimlens import settings as default_config
 from claimlens.exceptions import (
     LLMClientError, WorkerError, ContextTooLongError, ContentPolicyError,
@@ -72,6 +72,16 @@ TIMEOUT_RETRIES = 1
 # them apart means one deadline wins deterministically instead of racing.
 TIMEOUT_BACKSTOP_FACTOR = 1.5
 
+# Misses per (endpoint, model, task) before a prompt-cache warning: no hit in
+# the first CACHE_CHECK_AFTER answers, or that many in a row after hitting.
+# Twice the default concurrency, so the first wave (sent before any cache
+# existed) does not decide it alone.
+CACHE_CHECK_AFTER = 20
+
+# The prompt size most providers need before they cache anything (OpenAI,
+# Gemini Flash; Claude 5 starts at 512, vLLM/SGLang have no minimum).
+CACHE_MIN_TOKENS = 1024
+
 # Wall-clock timer for the progress bar, bound at import. Tests patch
 # asyncio.sleep to skip back-offs, which would turn the heartbeat into a
 # spin loop; the bar's repaint interval is not a back-off.
@@ -96,6 +106,33 @@ def _describe_error(e: Exception | None) -> str:
     return str(e)[:200]
 
 
+def _with_cache_marker(messages: list[dict] | None) -> tuple[list[dict], int] | None:
+    """Copy of *messages* with the last system message marked cacheable.
+
+    Returns (marked messages, characters in the marked message), or None when
+    there is no system message to mark. The marker is cache_control on the
+    message's last text block, so a string content becomes one text block.
+    Providers that cache on their own ignore the field.
+    """
+    for i in range(len(messages or []) - 1, -1, -1):
+        message = messages[i]
+        if message.get("role") != "system":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            parts = [{"type": "text", "text": content}]
+        elif (isinstance(content, list) and content and isinstance(content[-1], dict)
+              and content[-1].get("type") == "text"):
+            parts = [dict(p) for p in content]
+        else:
+            return None
+        parts[-1]["cache_control"] = {"type": "ephemeral"}
+        marked = list(messages)
+        marked[i] = {**message, "content": parts}
+        return marked, sum(len(p.get("text") or "") for p in parts)
+    return None
+
+
 class ErrorAction(Enum):
     """What to do when an API error occurs."""
     FATAL = "fatal"   # Exit program — unrecoverable
@@ -117,15 +154,22 @@ class LLMClient:
     _STRATEGY_CACHE: dict[tuple[str | None, str], int] = {}
     # Whether the endpoint accepts the LiteLLM-only `drop_params` field.
     _DROP_PARAMS_CACHE: dict[tuple[str | None, str], bool] = {}
+    # Whether the endpoint accepts the prompt-cache marker (cache_control).
+    _CACHE_MARKER_CACHE: dict[tuple[str | None, str], bool] = {}
+    # Live prompt-cache counters per (base_url, model, task), for the event
+    # lines: first hit, never hitting, stopped hitting, not reported.
+    _CACHE_WATCH: dict[tuple[str | None, str, str | None], dict] = {}
     # Init lines already emitted at info level, so duplicate (model, mode, url)
     # constructions don't spam startup. Repeats still log at debug.
     _INIT_LOGGED: set[tuple[str, str, str | None]] = set()
 
-    def __init__(self, api_key: str, model: str, base_url: str | None = None, concurrency: int = 10):
+    def __init__(self, api_key: str, model: str, base_url: str | None = None, concurrency: int = 10,
+                 prompt_cache: bool = True):
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
         self.concurrency = concurrency
+        self.prompt_cache = prompt_cache  # send the cache marker (see _with_cache_marker)
         
         self.timeout = getattr(default_config, 'LLM_TIMEOUT', 120.0)
         self.max_tokens = getattr(default_config, 'LLM_MAX_TOKENS', None)
@@ -161,7 +205,6 @@ class LLMClient:
         self._strategy_discovered = False   # True after first successful request
         self._discovery_succeeded = False   # True only if discovery pioneer actually got a 200
         self._discovery_lock = asyncio.Lock()  # Serializes strategy discovery
-        self._cache_hit_logged = False  # Only log cache hint once
         self._fatal_error_occurred = False
         self._discovering = False  # True while this client is walking the retry matrix
 
@@ -170,6 +213,11 @@ class LLMClient:
         # True = proxy (keep sending it), False = direct endpoint (never send it).
         # Seeded from the process-level cache if a sibling client already learned.
         self._drop_params_supported: bool | None = LLMClient._DROP_PARAMS_CACHE.get(
+            (self.base_url, self.model)
+        )
+        # The prompt-cache marker, learned the same way: None = unknown,
+        # True = accepted, False = rejected (never sent again).
+        self._cache_marker_supported: bool | None = LLMClient._CACHE_MARKER_CACHE.get(
             (self.base_url, self.model)
         )
 
@@ -267,6 +315,66 @@ class LLMClient:
             cached = LLMClient._DROP_PARAMS_CACHE.get((self.base_url, self.model))
             if cached is not None:
                 self._drop_params_supported = cached
+        if self._cache_marker_supported is None:
+            self._cache_marker_supported = LLMClient._CACHE_MARKER_CACHE.get(
+                (self.base_url, self.model))
+
+
+    def _learn_cache_marker(self, accepted: bool) -> None:
+        """Record whether this endpoint accepts the cache marker, process-wide."""
+        self._cache_marker_supported = accepted
+        LLMClient._CACHE_MARKER_CACHE[(self.base_url, self.model)] = accepted
+        if not accepted:
+            logger.info("   💾 %s rejected the prompt-cache marker — sending without it.",
+                        self.base_url or self.model)
+
+
+    def _watch_cache(self, task: str | None, usage: Any, marked_chars: int | None) -> None:
+        """The live prompt-cache lines, one set per (endpoint, model, task).
+
+        Events only — the final share is in the token table. The first marked
+        request notes the fixed prompt part's size against CACHE_MIN_TOKENS (an
+        estimate: ~4 characters per token). Then: the first hit; a warning when
+        nothing hit in the first CACHE_CHECK_AFTER answers, or when that many
+        miss in a row after hitting (a provider switch or an expired cache);
+        one note when the first answer does not report cache use at all.
+        """
+        w = LLMClient._CACHE_WATCH.setdefault((self.base_url, self.model, task), {
+            "answers": 0, "reported": 0, "hits": 0, "misses_in_row": 0, "noted": False,
+        })
+        label = f"{self.model} ({task})" if task else self.model
+        if marked_chars is not None and not w["noted"]:
+            w["noted"] = True
+            est = marked_chars // 4
+            if est < CACHE_MIN_TOKENS:
+                logger.info("💾 Prompt cache on for %s · fixed prompt part ~%s tokens (below %s — "
+                            "most providers won't cache it)", label, f"{est:,}", f"{CACHE_MIN_TOKENS:,}")
+            else:
+                logger.debug("💾 Prompt cache on for %s · fixed prompt part ~%s tokens (above %s)",
+                             label, f"{est:,}", f"{CACHE_MIN_TOKENS:,}")
+
+        cached = cached_tokens(usage)
+        w["answers"] += 1
+        if cached is None:
+            if w["answers"] == 1:
+                logger.info("💾 %s: endpoint does not report cache use — hits can't be shown", label)
+            return
+
+        w["reported"] += 1
+        if cached:
+            if not w["hits"]:
+                logger.info("💾 Prompt cache hit for %s", label)
+            w["hits"] += 1
+            w["misses_in_row"] = 0
+            return
+
+        w["misses_in_row"] += 1
+        if not w["hits"] and w["reported"] == CACHE_CHECK_AFTER:
+            logger.warning("⚠️  Prompt cache not hitting for %s: none of the first %d requests read "
+                           "from cache", label, CACHE_CHECK_AFTER)
+        elif w["hits"] and w["misses_in_row"] == CACHE_CHECK_AFTER:
+            logger.warning("⚠️  Prompt cache stopped hitting for %s: the last %d requests read nothing "
+                           "from cache (provider switch or expired cache?)", label, CACHE_CHECK_AFTER)
 
 
     def _next_strategy(self) -> bool:
@@ -584,9 +692,20 @@ class LLMClient:
                 server_err_count = 0
                 timeout_count = 0
                 only_parse_failures = True
+                # Prompt-cache marker: on unless switched off or rejected here.
+                # marker_probe = a marked request 400'd and is being re-sent
+                # without it; success then means the endpoint rejects the marker.
+                marker_on = self.prompt_cache and self._cache_marker_supported is not False
+                marker_probe = False
 
                 while attempt <= max_retries:
                     sent_drop_params = False  # did THIS request carry drop_params?
+                    marked = _with_cache_marker(messages) if marker_on else None
+                    sent_marker = marked is not None
+                    send_messages = marked[0] if marked else messages
+                    send_plain = plain_messages
+                    if marked and plain_messages:
+                        send_plain = (_with_cache_marker(plain_messages) or (plain_messages,))[0]
                     try:
                         if self.base_url:
                             # ── OpenAI SDK Path ────────────────────────────
@@ -598,7 +717,7 @@ class LLMClient:
                             strategy = self.strategy
                             call_kwargs = {
                                 "model": self.model,
-                                "messages": messages,
+                                "messages": send_messages,
                                 "temperature": strategy.temperature,
                                 **kwargs,
                             }
@@ -643,7 +762,7 @@ class LLMClient:
                                         "   📝 %s: sending the caller's plain prompt",
                                         strategy.name,
                                     )
-                                    call_kwargs["messages"] = plain_messages
+                                    call_kwargs["messages"] = send_plain
 
                             with self._inflight_request():
                                 response = await asyncio.wait_for(
@@ -662,7 +781,7 @@ class LLMClient:
 
                             call_kwargs = {
                                 "model": self.model,
-                                "messages": messages,
+                                "messages": send_messages,
                                 "api_key": self.api_key,
                                 "drop_params": True, # Does NOT try out capability matrix. Trust in Litellm. If you want to do capabilitytesting set base_url even when using a provider.
                                 "timeout": self.timeout * TIMEOUT_BACKSTOP_FACTOR,
@@ -691,9 +810,22 @@ class LLMClient:
                         if sent_drop_params and self._drop_params_supported is None:
                             self._drop_params_supported = True
                             LLMClient._DROP_PARAMS_CACHE[(self.base_url, self.model)] = True
+                        # The marker either went through, or its absence is the
+                        # only thing that changed since the 400.
+                        if sent_marker and self._cache_marker_supported is None:
+                            self._learn_cache_marker(True)
+                        elif marker_probe:
+                            self._learn_cache_marker(False)
 
+                        usage = None
                         if hasattr(response, 'usage') and response.usage:
-                            GLOBAL_STATS.update(response.usage.model_dump())
+                            usage = response.usage.model_dump()
+                            GLOBAL_STATS.update(usage)
+                        if self.prompt_cache:
+                            try:
+                                self._watch_cache(task, usage, marked[1] if marked else None)
+                            except Exception as watch_error:  # display only — never ends a request
+                                logger.debug("prompt-cache watch failed: %r", watch_error)
 
                         # Validated here, not by .parse(), so a structurally broken
                         # response is still counted above before it raises.
@@ -717,13 +849,6 @@ class LLMClient:
                                 self.model, self.base_url,
                                 self.strategy.name if self.base_url else "LiteLLM passthrough",
                             )
-
-                        # Cache hint (only log once to avoid spam) Catch it properly
-                        if not self._cache_hit_logged:
-                            cache_hit = getattr(response, '_hidden_params', {}).get('cache_hit', False)
-                            if cache_hit:
-                                logger.info("   💾 Cache hit detected — provider is caching responses.")
-                                self._cache_hit_logged = True
 
                         return response.choices[0].message.content
 
@@ -765,6 +890,18 @@ class LLMClient:
                             isinstance(e, BadRequestError)
                             or e.__class__.__name__ == 'BadRequestError'
                         )
+                        # Prompt-cache marker probe, ahead of drop_params so one
+                        # thing changes at a time: a 400 on a marked request while
+                        # the endpoint is unknown → re-send the SAME request
+                        # without the marker. If that fails too, the marker was
+                        # not the cause: it stays off for this call only, and the
+                        # error is handled below as usual.
+                        if marker_probe:
+                            marker_probe = False
+                        elif sent_marker and self._cache_marker_supported is None and _is_bad_request:
+                            marker_on, marker_probe = False, True
+                            continue
+
                         if sent_drop_params and self._drop_params_supported is None and _is_bad_request:
                             self._drop_params_supported = False
                             LLMClient._DROP_PARAMS_CACHE[(self.base_url, self.model)] = False

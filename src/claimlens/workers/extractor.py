@@ -63,6 +63,7 @@ class Extractor:
         model: str,
         base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         retry_rounds: list[RetryRoundConfig] | None = None,
     ):
         self.model = model
@@ -71,6 +72,7 @@ class Extractor:
             model=model,
             base_url=base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
         )
         self._prompt_template = settings.PROMPTS["extractor_prompt"]
         self.last_stats: PhaseStats | None = None

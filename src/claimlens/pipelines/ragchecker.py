@@ -388,6 +388,7 @@ class RagCheckerPipeline(BaseService):
         extractor_base_url: str | None = None,
         checker_base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         dedup: bool = True,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
@@ -428,6 +429,7 @@ class RagCheckerPipeline(BaseService):
             model=extractor_model,
             base_url=extractor_base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             verbosity=child_verbosity,
             dedup=dedup,
         )
@@ -457,6 +459,7 @@ class RagCheckerPipeline(BaseService):
                 extractor_model=extractor_model,
                 base_url=checker_base_url,
                 concurrency=concurrency,
+                prompt_cache=prompt_cache,
                 joint=joint,
                 joint_num=joint_num,
                 max_words=max_words,

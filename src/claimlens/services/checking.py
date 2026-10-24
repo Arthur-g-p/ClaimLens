@@ -134,6 +134,7 @@ class CheckingService(BaseService):
         extractor_model: str,
         base_url: str | None = None,
         concurrency: int = 10,
+        prompt_cache: bool = True,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
@@ -177,6 +178,7 @@ class CheckingService(BaseService):
             model=model,
             base_url=base_url,
             concurrency=concurrency,
+            prompt_cache=prompt_cache,
             joint_prompt_key=joint_prompt_key,
         )
 

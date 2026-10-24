@@ -306,6 +306,10 @@ installed LiteLLM release knowing the model, while a base URL bypasses that
 lookup entirely. Either way the key comes from `EXTRACTOR_API_KEY` /
 `CHECKER_API_KEY`.
 
+**Prompt caching** is on by default on every endpoint (`--no-prompt-cache`
+turns it off). The token table shows each command's cache read. See
+[docs/request_strategies.md](docs/request_strategies.md#prompt-caching).
+
 ## Documentation
 
 - [examples/README.md](examples/README.md) — the five-step walkthrough:
@@ -317,8 +321,8 @@ lookup entirely. Either way the key comes from `EXTRACTOR_API_KEY` /
 - [architecture.md](architecture.md) — the full design document (layer
   model, data contract, error propagation)
 - [docs/request_strategies.md](docs/request_strategies.md) — how requests
-  reach the model: capability discovery, retry behaviour, timeouts, and the
-  settings you can tune
+  reach the model: capability discovery, retry behaviour, timeouts, prompt
+  caching, and the settings you can tune
 - [docs/ragchecker.md](docs/ragchecker.md) — the RAG evaluation pipeline
 - [docs/faithfulness.md](docs/faithfulness.md) — ground-truth-free
   faithfulness checking
