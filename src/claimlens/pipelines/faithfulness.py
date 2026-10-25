@@ -87,6 +87,7 @@ class FaithfulnessPipeline(BaseService):
         checker_base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         dedup: bool = True,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
@@ -113,11 +114,13 @@ class FaithfulnessPipeline(BaseService):
         self._namespace = f"{checker_model}_retrieved2response"
 
         # Compose the services. Each fail-fasts on its own API key here.
+        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
         self._extract = ExtractionService(
             model=extractor_model,
             base_url=extractor_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
             verbosity=child_verbosity,
             section_label="Extraction: response",
             dedup=dedup,
@@ -128,6 +131,7 @@ class FaithfulnessPipeline(BaseService):
             base_url=checker_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
             joint=joint,
             joint_num=joint_num,
             max_words=max_words,
@@ -249,6 +253,7 @@ class FaithfulnessPipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
+            prompts_sha256=settings.prompts_sha256(self._prompts),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
@@ -475,7 +480,7 @@ class FaithfulnessPipeline(BaseService):
         logger.info("    Checker:     %s", _location(self._check))
         logger.info("    Mode:        %s", self._check.mode_label)
         logger.info("    Direction:   retrieved2response (no ground truth)")
-        logger.info("    Prompts:     %s", settings.PROMPT_PATH)
+        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
         logger.info("")
 
     def _log_results(self) -> None:

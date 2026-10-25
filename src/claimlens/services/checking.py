@@ -135,6 +135,7 @@ class CheckingService(BaseService):
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
@@ -173,12 +174,14 @@ class CheckingService(BaseService):
         self._explanation_key = f"{namespace}_explanation"
         self._checker_error_key = f"{namespace}_error"
         self._checker_retry_key = f"{namespace}_retry"
+        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
         self._checker = Checker(
             api_key=api_key,
             model=model,
             base_url=base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
             joint_prompt_key=joint_prompt_key,
         )
 
@@ -615,7 +618,7 @@ class CheckingService(BaseService):
         logger.info("    Model:       %s", location)
         logger.info("    Extractor:   %s (reading '%s')", self._extractor_model, self._kg_key)
         logger.info("    Mode:        %s", self.mode_label)
-        logger.info("    Prompts:     %s", settings.PROMPT_PATH)
+        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
         logger.info("")
 
     def _log_results(

@@ -40,9 +40,10 @@ stay instant, and the pipeline stack pulls in litellm.
 """
 
 import asyncio
+from pathlib import Path
 from typing import NamedTuple
 
-from claimlens.settings import enable_logging
+from claimlens.settings import enable_logging, resolve_prompts
 from claimlens.utils import _package_version
 from claimlens.viewer import render_html, write_html
 
@@ -72,8 +73,18 @@ def _no_running_loop(verb: str, hint: str) -> None:
 
 def _args(command: str, params: dict) -> dict:
     """The record's ``_args`` block, as the CLI writes it: what was asked
-    for. From the library every parameter given is explicit."""
-    return {"command": command, **params, "_explicit": sorted(params)}
+    for. From the library every parameter given is explicit. A path is
+    written as text, as the CLI does."""
+    values = {k: str(v) if isinstance(v, Path) else v for k, v in params.items()}
+    return {"command": command, **values, "_explicit": sorted(params)}
+
+
+def _with_templates(kwargs: dict) -> dict:
+    """Constructor kwargs with a ``prompts`` file resolved to its templates, as
+    the CLI's --prompts does. The path itself stays in ``_args``."""
+    if kwargs.get("prompts") is None:
+        return kwargs
+    return {**kwargs, "prompts": resolve_prompts(kwargs["prompts"])}
 
 
 def _report(pipeline, command: str, params: dict) -> Report:
@@ -94,7 +105,7 @@ def ragcheck(items: list[dict], *, extractor_model: str, checker_model: str,
     _no_running_loop("ragcheck", "await RagCheckerPipeline(...).run(items)")
     from claimlens.pipelines.ragchecker import RagCheckerPipeline
     params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
-    pipeline = RagCheckerPipeline(**params)
+    pipeline = RagCheckerPipeline(**_with_templates(params))
     pipeline.run_sync(items)
     return _report(pipeline, "ragcheck", params)
 
@@ -107,7 +118,7 @@ def faithcheck(items: list[dict], *, extractor_model: str, checker_model: str,
     _no_running_loop("faithcheck", "await FaithfulnessPipeline(...).run(items)")
     from claimlens.pipelines.faithfulness import FaithfulnessPipeline
     params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
-    pipeline = FaithfulnessPipeline(**params)
+    pipeline = FaithfulnessPipeline(**_with_templates(params))
     pipeline.run_sync(items)
     return _report(pipeline, "faithcheck", params)
 
@@ -119,7 +130,7 @@ def refcheck(items: list[dict], *, extractor_model: str, checker_model: str,
     _no_running_loop("refcheck", "await RefCheckerPipeline(...).run(items)")
     from claimlens.pipelines.refchecker import RefCheckerPipeline
     params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
-    pipeline = RefCheckerPipeline(**params)
+    pipeline = RefCheckerPipeline(**_with_templates(params))
     pipeline.run_sync(items)
     return _report(pipeline, "refcheck", params)
 
@@ -148,7 +159,7 @@ def compare(a: str | list[dict], b: str | None = None, *, extractor_model: str,
     from claimlens.pipelines.compare import ComparePipeline
     items = _compare_items(a, b)
     params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
-    pipeline = ComparePipeline(**params)
+    pipeline = ComparePipeline(**_with_templates(params))
     pipeline.run_sync(items)
     return _report(pipeline, "compare", params)
 
@@ -160,7 +171,7 @@ async def acompare(a: str | list[dict], b: str | None = None, *, extractor_model
     from claimlens.pipelines.compare import ComparePipeline
     items = _compare_items(a, b)
     params = dict(extractor_model=extractor_model, checker_model=checker_model, **kwargs)
-    pipeline = ComparePipeline(**params)
+    pipeline = ComparePipeline(**_with_templates(params))
     await pipeline.run(items)
     return _report(pipeline, "compare", params)
 
@@ -171,7 +182,7 @@ def extract(items: list[dict], *, extractor_model: str,
     onto the items. Returns the enriched list, the input of ``check``."""
     _no_running_loop("extract", "await ExtractionService(...).run(items)")
     from claimlens.services.extraction import ExtractionService
-    service = ExtractionService(model=extractor_model, base_url=extractor_base_url, **kwargs)
+    service = ExtractionService(model=extractor_model, base_url=extractor_base_url, **_with_templates(kwargs))
     return service.run_sync(items)
 
 
@@ -183,7 +194,7 @@ def check(items: list[dict], *, checker_model: str, extractor_model: str,
     _no_running_loop("check", "await CheckingService(...).run(items)")
     from claimlens.services.checking import CheckingService
     service = CheckingService(model=checker_model, extractor_model=extractor_model,
-                              base_url=checker_base_url, **kwargs)
+                              base_url=checker_base_url, **_with_templates(kwargs))
     return service.run_sync(items)
 
 
@@ -195,14 +206,14 @@ def check_faithfulness(*args, **kwargs) -> dict:
     signature; ``acheck_faithfulness`` is the form for async callers."""
     _no_running_loop("check_faithfulness", "await claimlens.acheck_faithfulness(...)")
     from claimlens.pipelines.faithfulness import check_faithfulness as _impl
-    return _impl(*args, **kwargs)
+    return _impl(*args, **_with_templates(kwargs))
 
 
 async def acheck_faithfulness(*args, **kwargs) -> dict:
     """The async twin of ``check_faithfulness``: same arguments, same return,
     for callers already inside an event loop."""
     from claimlens.pipelines.faithfulness import acheck_faithfulness as _impl
-    return await _impl(*args, **kwargs)
+    return await _impl(*args, **_with_templates(kwargs))
 
 
 __all__ = [

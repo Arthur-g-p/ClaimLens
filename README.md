@@ -310,6 +310,23 @@ lookup entirely. Either way the key comes from `EXTRACTOR_API_KEY` /
 turns it off). The token table shows each command's cache read. See
 [docs/request_strategies.md](docs/request_strategies.md#prompt-caching).
 
+## Your own prompts
+
+`--prompts my_prompts.json` replaces prompt templates for one run, on every
+command. The file holds only the keys you change; every other key comes from
+the shipped [prompt_map.json](src/claimlens/prompt_map.json):
+
+```json
+{"extractor_prompt": "…your extractor prompt, with {{text}}…"}
+```
+
+An unknown key or broken JSON stops the run before the first request. The
+report's `_args` names the file and `_meta.prompts_sha256` records a hash of
+the full template set in force (the Config block shows it too), so a record
+still says which prompts made it after the file changes. From Python:
+`prompts="my_prompts.json"` on the verbs; the pipeline classes take the resolved
+templates, `prompts=claimlens.settings.resolve_prompts("my_prompts.json")`.
+
 ## Documentation
 
 - [examples/README.md](examples/README.md) — the five-step walkthrough:

@@ -126,6 +126,7 @@ class Checker:
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         retry_rounds: list[RetryRoundConfig] | None = None,
         joint_prompt_key: str | None = None,
     ):
@@ -137,17 +138,18 @@ class Checker:
             concurrency=concurrency,
             prompt_cache=prompt_cache,
         )
-        self._prompt_template = settings.PROMPTS["checker_prompt"]
+        templates = prompts or settings.PROMPTS
+        self._prompt_template = templates["checker_prompt"]
         joint_key = joint_prompt_key or "checker_prompt_joint"
-        self._joint_prompt_template = settings.PROMPTS[joint_key]
+        self._joint_prompt_template = templates[joint_key]
         key = "checker_prompt_plain"
         self._plain_prompt = prepare_plain_prompt(
-            settings.PROMPTS.get(key), key, CheckResult, logger)
+            templates.get(key), key, CheckResult, logger)
         # Derived from the key in use — a hardcoded one would swap the task when
         # joint_prompt_key is not the default.
         joint_plain_key = f"{joint_key}_plain"
         self._joint_plain_prompt = prepare_plain_prompt(
-            settings.PROMPTS.get(joint_plain_key), joint_plain_key, JointCheckResult, logger)
+            templates.get(joint_plain_key), joint_plain_key, JointCheckResult, logger)
         self.last_stats: PhaseStats | None = None
 
         self._retry_rounds = retry_rounds or DEFAULT_RETRY_ROUNDS

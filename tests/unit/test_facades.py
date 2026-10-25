@@ -81,6 +81,13 @@ class TestBatchVerbs:
         assert findings["_args"] == record["_args"]
         assert isinstance((record, findings), tuple)
 
+    def test_a_prompts_path_is_written_as_text(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("claimlens.pipelines.ragchecker.RagCheckerPipeline", _FakePipeline)
+        path = tmp_path / "mine.json"
+        path.write_text("{}", encoding="utf-8")
+        record, _ = claimlens.ragcheck(ITEMS, extractor_model="e", checker_model="c", prompts=path)
+        assert record["_args"]["prompts"] == str(path)
+
     @pytest.mark.parametrize("verb,target", [
         ("faithcheck", "claimlens.pipelines.faithfulness.FaithfulnessPipeline"),
         ("refcheck", "claimlens.pipelines.refchecker.RefCheckerPipeline"),

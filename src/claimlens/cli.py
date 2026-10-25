@@ -72,6 +72,15 @@ _ARGS_DENYLIST = frozenset({
 })
 
 
+def _load_prompts(path: Path | None) -> dict[str, str]:
+    """--prompts, resolved before any request; a bad file ends the command cleanly."""
+    try:
+        return settings.resolve_prompts(path)
+    except ValueError as exc:
+        logger.error("❌ %s", exc)
+        raise typer.Exit(code=1)
+
+
 def _capture_args(ctx: typer.Context, command: str) -> dict:
     """The ``_args`` block: every parameter of the current invocation.
 
@@ -138,6 +147,7 @@ def extract(
     dedup: bool = typer.Option(True, "--dedup/--no-dedup", help="Remove exact (s,p,o) duplicate triplets from the output. On by default (loss-free cleanup)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run the extraction pipeline on a JSON dataset."""
@@ -162,7 +172,8 @@ def extract(
 
     # Call service
     try:
-        service = ExtractionService(model=model, base_url=extractor_base_api, dedup=dedup, concurrency=concurrency, prompt_cache=prompt_cache)
+        service = ExtractionService(model=model, base_url=extractor_base_api, dedup=dedup, concurrency=concurrency, prompt_cache=prompt_cache,
+                                    prompts=_load_prompts(prompts))
         result = service.run_sync(data)
     except ClaimLensError as exc:
         logger.error("")
@@ -186,6 +197,7 @@ def check(
     max_words: int = typer.Option(None, "--max-words", help="Word budget per LLM call. Default: 6000 in joint mode, unset in single."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Check extracted claims against reference passages."""
@@ -213,6 +225,7 @@ def check(
         service = CheckingService(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             model=model,
             extractor_model=extractor_model,
             base_url=checker_base_api,
@@ -242,6 +255,7 @@ def atomize(
     trace: bool = typer.Option(True, "--trace/--no-trace", help="Also write a per-triplet decision trace to {output}_decisions.json."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Atomize compound triplets into atomic facts."""
@@ -269,6 +283,7 @@ def atomize(
         service = AtomizationService(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             model=model,
             source_kg_key=source_kg_key,
             base_url=atomizer_base_api,
@@ -309,6 +324,7 @@ def refcheck(
     max_words: int = typer.Option(None, "--max-words", help="Word budget per checker call. Default: 6000 in joint mode."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run RefChecker: extraction + checking in one pass, one output document."""
@@ -336,6 +352,7 @@ def refcheck(
         pipeline = RefCheckerPipeline(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -382,6 +399,7 @@ def ragcheck(
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run RagChecker: 2 extractions + 4 checking directions, one report file."""
@@ -408,6 +426,7 @@ def ragcheck(
         pipeline = RagCheckerPipeline(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -457,6 +476,7 @@ def faithcheck(
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Run faithfulness checking without ground truth: response claims vs retrieved context."""
@@ -483,6 +503,7 @@ def faithcheck(
         pipeline = FaithfulnessPipeline(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -532,6 +553,7 @@ def compare(
     runs: int = typer.Option(1, "--runs", help="Repeat the whole run N times and report variance (N x LLM cost)."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(False, "--debug", help="Enable debug output with timestamps and module names."),
 ):
     """Compare two texts claim by claim, both ways: each text's claims checked against the other text."""
@@ -558,6 +580,7 @@ def compare(
         pipeline = ComparePipeline(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             extractor_model=extractor_model,
             checker_model=checker_model,
             extractor_base_url=extractor_base_api,
@@ -632,6 +655,7 @@ def eval_checker(
     ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug output."
     ),
@@ -660,6 +684,7 @@ def eval_checker(
         evaluator = CheckerEvaluator(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             checker_model=checker_model,
             gt_key=gt_key,
             checker_base_url=checker_base_api,
@@ -745,6 +770,7 @@ def eval_extractor(
     ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark the fixed system prompt as cacheable (cache_control). On by default."),
+    prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug output.",
     ),
@@ -773,6 +799,7 @@ def eval_extractor(
         evaluator = ExtractorEvaluator(
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=_load_prompts(prompts),
             extractor_model=extractor_model,
             gt_key=gt_key,
             extractor_base_url=extractor_base_api,

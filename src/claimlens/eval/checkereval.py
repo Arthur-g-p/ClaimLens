@@ -129,6 +129,7 @@ class CheckerEvaluator(Evaluator):
         checker_base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
@@ -154,12 +155,14 @@ class CheckerEvaluator(Evaluator):
         # token table to the evaluator. In variance mode the service runs
         # silent: per-run plumbing is cut, the eval blocks + VARIANCE
         # report instead (progress bars are not logging and remain).
+        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
         self._service = CheckingService(
             model=checker_model,
             extractor_model=_INTERNAL_EXT_MODEL,
             base_url=checker_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
             joint=joint,
             joint_num=joint_num,
             max_words=max_words,
@@ -255,6 +258,7 @@ class CheckerEvaluator(Evaluator):
             dropped_items=sk["missing_gt"] + sk["missing_context"] + sk["empty_gt"],
             checking="per_chunk",
             request_strategies=GLOBAL_STATS.strategies(),
+            prompts_sha256=settings.prompts_sha256(self._prompts),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
@@ -697,7 +701,7 @@ class CheckerEvaluator(Evaluator):
         logger.info("    Reference:   one chunk per call, as ragcheck"
                     " (Entailment if any chunk entails)")
 
-        logger.info("    Prompts:     %s", settings.PROMPT_PATH)
+        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
         logger.info("")
 
     def _log_eval_results(

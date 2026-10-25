@@ -30,6 +30,11 @@ CLI (controllers)  →  Pipelines / Services (orchestration)  →  Workers (exec
 
 - `settings.py` — env vars, logger factory, prompt loading. Reads eagerly,
   never crashes on missing config ("Settings reads, Services validate").
+  `resolve_prompts()` lays `--prompts` (a file with only the keys it
+  changes) over the shipped templates. The entry point (CLI or library verb)
+  resolves the path once; every constructor below takes the resulting dict
+  (`None` = shipped), passed down like `concurrency`. `prompts_sha256()` is
+  `_meta.prompts_sha256`.
 - `exceptions.py` — hierarchy: `ClaimLensError → CLIError / ServiceError
   (InvalidInputError, FilterError) / WorkerError (LLMClientError, ParsingError,
   ContextTooLongError, ContentPolicyError)`. **[UNVERIFIED: exact leaf list]**

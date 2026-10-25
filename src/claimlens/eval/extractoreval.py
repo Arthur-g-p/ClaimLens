@@ -160,6 +160,7 @@ class ExtractorEvaluator(Evaluator):
         checker_base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
         # Atomicity axis (optional, orthogonal to coverage)
@@ -195,6 +196,7 @@ class ExtractorEvaluator(Evaluator):
                 f"--gt-key so the two do not overlap."
             )
 
+        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
         # Extraction service — always needed (quiet, evaluator owns logging;
         # silent in variance mode — per-run plumbing is cut).
         # dedup=False: the eval measures duplicates as an independent dimension,
@@ -204,6 +206,7 @@ class ExtractorEvaluator(Evaluator):
             base_url=extractor_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
             verbosity="silent" if self._runs > 1 else "compact",
             dedup=False,
         )
@@ -234,6 +237,7 @@ class ExtractorEvaluator(Evaluator):
                 base_url=atomizer_base_url,
                 concurrency=concurrency,
                 prompt_cache=prompt_cache,
+                prompts=self._prompts,
                 verbosity="silent" if self._runs > 1 else "compact",
             )
 
@@ -352,6 +356,7 @@ class ExtractorEvaluator(Evaluator):
             pred_key=self._pred_key,
             matching="llm-2-pass",
             request_strategies=GLOBAL_STATS.strategies(),
+            prompts_sha256=settings.prompts_sha256(self._prompts),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
@@ -827,6 +832,7 @@ class ExtractorEvaluator(Evaluator):
             base_url=self._checker_base_url,
             concurrency=self._concurrency,
             prompt_cache=self._prompt_cache,
+            prompts=self._prompts,
             joint=True,
             joint_num=self._joint_num,
             max_words=self._max_words,
@@ -854,6 +860,7 @@ class ExtractorEvaluator(Evaluator):
             base_url=self._checker_base_url,
             concurrency=self._concurrency,
             prompt_cache=self._prompt_cache,
+            prompts=self._prompts,
             joint=True,
             joint_num=self._joint_num,
             max_words=self._max_words,
@@ -1168,7 +1175,7 @@ class ExtractorEvaluator(Evaluator):
         else:
             logger.info("    Atomicity:   skipped (%s)", self._atomizer_skip_reason)
 
-        logger.info("    Prompts:     %s", settings.PROMPT_PATH)
+        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
         logger.info("")
 
     def _log_eval_results(self, result: ExtractorEvalResult) -> None:

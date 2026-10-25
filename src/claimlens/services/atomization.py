@@ -42,6 +42,7 @@ class AtomizationService(BaseService):
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         verbosity: str = "full",
         section_label: str | None = None,
         dedup: bool = True,
@@ -55,12 +56,14 @@ class AtomizationService(BaseService):
         self.base_url = base_url
         self._source_kg_key = source_kg_key
         self._archive_kg_key = f"{source_kg_key}_not_atomized"
+        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
         self._atomizer = Atomizer(
             api_key=api_key,
             model=model,
             base_url=base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
+            prompts=self._prompts,
         )
 
         self._init_verbosity(verbosity, section_label)
@@ -357,7 +360,7 @@ class AtomizationService(BaseService):
         logger.info("    Model:       %s", location)
         logger.info("    Source key:   %s", self._source_kg_key)
         logger.info("    Archive key:  %s", self._archive_kg_key)
-        logger.info("    Prompts:     %s", settings.PROMPT_PATH)
+        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
         logger.info("")
 
     def _log_results(

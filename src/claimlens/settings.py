@@ -13,6 +13,7 @@ Logging architecture:
 
 import os
 import json
+import hashlib
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
@@ -159,3 +160,47 @@ def _load_prompts() -> dict[str, str]:
 
 
 PROMPTS: dict[str, str] = _load_prompts()
+
+
+def resolve_prompts(path: str | Path | None = None) -> dict[str, str]:
+    """The full template dict for a run: the shipped prompts with a prompt file laid over them.
+
+    None = the shipped prompt_map.json as is. The file (--prompts) holds only the
+    keys it changes. Unknown keys, non-string templates or a broken file raise
+    ValueError, so a bad file stops the run before any request. Called once, at
+    the entry point (CLI or library verb); everything below receives the dict.
+    """
+    if path is None:
+        return PROMPTS
+    path = Path(path)
+    label = str(path)
+    try:
+        overrides = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ValueError(f"Prompt file not found: {path}") from None
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Prompt file {path} is not valid JSON: {exc}") from exc
+    if not isinstance(overrides, dict):
+        raise ValueError(f"{label}: expected a JSON object of {{key: template}}")
+    unknown = sorted(set(overrides) - set(PROMPTS))
+    if unknown:
+        raise ValueError(f"{label}: unknown prompt key(s) {', '.join(unknown)}. "
+                         f"Known keys: {', '.join(sorted(PROMPTS))}")
+    not_text = sorted(k for k, v in overrides.items() if not isinstance(v, str))
+    if not_text:
+        raise ValueError(f"{label}: template(s) must be strings: {', '.join(not_text)}")
+    return {**PROMPTS, **overrides}
+
+
+def prompts_sha256(templates: dict[str, str]) -> str:
+    """Short hash of the templates a run used, for _meta.prompts_sha256: a record
+    still names its prompts after the file changes. Content only — the same
+    templates hash the same from any file name."""
+    canonical = json.dumps(templates, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()[:12]
+
+
+def describe_prompts(templates: dict[str, str]) -> str:
+    """The Config block's Prompts line: shipped or custom, and the hash."""
+    source = str(PROMPT_PATH) if templates == PROMPTS else f"custom, over {PROMPT_PATH.name}"
+    return f"{source} · sha256 {prompts_sha256(templates)}"

@@ -73,6 +73,7 @@ class Atomizer:
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
+        prompts: dict[str, str] | None = None,
         retry_rounds: list[RetryRoundConfig] | None = None,
     ):
         self.model = model
@@ -83,12 +84,13 @@ class Atomizer:
             concurrency=concurrency,
             prompt_cache=prompt_cache,
         )
-        self._prompt_template = settings.PROMPTS["atomizer_prompt"]
+        templates = prompts or settings.PROMPTS
+        self._prompt_template = templates["atomizer_prompt"]
         self.last_stats: PhaseStats | None = None
 
         key = "atomizer_prompt_plain"
         self._plain_prompt = prepare_plain_prompt(
-            settings.PROMPTS.get(key), key, AtomizationDecision, logger)
+            templates.get(key), key, AtomizationDecision, logger)
 
         self._retry_rounds = retry_rounds or DEFAULT_RETRY_ROUNDS
 
