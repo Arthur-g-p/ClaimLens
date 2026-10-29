@@ -81,6 +81,11 @@ class TestBatchVerbs:
         assert findings["_args"] == record["_args"]
         assert isinstance((record, findings), tuple)
 
+    def test_templates_is_refused_at_the_verbs(self, monkeypatch):
+        monkeypatch.setattr("claimlens.pipelines.ragchecker.RagCheckerPipeline", _FakePipeline)
+        with pytest.raises(TypeError, match="take prompts="):
+            claimlens.ragcheck(ITEMS, extractor_model="e", checker_model="c", templates={})
+
     def test_a_prompts_path_is_written_as_text(self, monkeypatch, tmp_path):
         monkeypatch.setattr("claimlens.pipelines.ragchecker.RagCheckerPipeline", _FakePipeline)
         path = tmp_path / "mine.json"

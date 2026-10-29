@@ -28,7 +28,6 @@ def _service(**kwargs) -> AtomizationService:
     defaults.update(kwargs)
     with patch("claimlens.services.atomization.settings") as mock_settings:
         mock_settings.ATOMIZER_API_KEY = "test-key"
-        mock_settings.PROMPT_PATH = "/fake/prompts.json"
         mock_settings.get_logger = MagicMock(return_value=MagicMock())
         with patch("claimlens.services.atomization.Atomizer"):
             return AtomizationService(**defaults)

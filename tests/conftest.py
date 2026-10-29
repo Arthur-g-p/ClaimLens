@@ -16,11 +16,12 @@ def _fresh_prompt_cache_state():
     """The marker verdict and the live cache counters are process-wide; a test
     that taught them must not change what the next test sends or logs."""
     from claimlens.llmclient import LLMClient
-    LLMClient._CACHE_MARKER_CACHE.clear()
-    LLMClient._CACHE_WATCH.clear()
+    from claimlens.stats import GLOBAL_STATS
+    for state in (LLMClient._CACHE_MARKER_CACHE, LLMClient._CACHE_WATCH, GLOBAL_STATS._cache_markers):
+        state.clear()
     yield
-    LLMClient._CACHE_MARKER_CACHE.clear()
-    LLMClient._CACHE_WATCH.clear()
+    for state in (LLMClient._CACHE_MARKER_CACHE, LLMClient._CACHE_WATCH, GLOBAL_STATS._cache_markers):
+        state.clear()
 
 
 @pytest.fixture(autouse=True)

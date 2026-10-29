@@ -18,7 +18,7 @@ is simply empty.
 import time
 from datetime import datetime
 
-from claimlens import settings
+from claimlens import prompts, settings
 from claimlens.exceptions import InvalidInputError
 from claimlens.models import DEFAULT_RETRY_ROUNDS
 from claimlens.pipelines.directions import (
@@ -54,7 +54,7 @@ class RefCheckerPipeline(BaseService):
         checker_base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         dedup: bool = True,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
@@ -89,13 +89,13 @@ class RefCheckerPipeline(BaseService):
         self._checker_retry_key = f"{namespace}_retry"
 
         # Compose the two services. Each fail-fasts on its own API key here.
-        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
+        self._templates = templates or prompts.PROMPTS  # resolved at the entry point, passed down
         self._extraction = ExtractionService(
             model=extractor_model,
             base_url=extractor_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
-            prompts=self._prompts,
+            templates=self._templates,
             verbosity=child_verbosity,
             section_label="Extraction: response",
             dedup=dedup,
@@ -106,7 +106,7 @@ class RefCheckerPipeline(BaseService):
             base_url=checker_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
-            prompts=self._prompts,
+            templates=self._templates,
             joint=joint,
             joint_num=joint_num,
             max_words=max_words,
@@ -220,7 +220,9 @@ class RefCheckerPipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
-            prompts_sha256=settings.prompts_sha256(self._prompts),
+            prompt_cache_marker=GLOBAL_STATS.cache_markers(),
+            prompts_sha256=prompts.prompts_sha256(self._templates),
+            prompts_overridden=prompts.prompts_overridden(self._templates),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
@@ -346,7 +348,7 @@ class RefCheckerPipeline(BaseService):
         logger.info("    Extractor:   %s", _location(self._extraction))
         logger.info("    Checker:     %s", _location(self._checking))
         logger.info("    Mode:        %s", self._checking.mode_label)
-        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
+        logger.info("    Prompts:     %s", prompts.describe_prompts(self._templates))
         logger.info("")
 
     def _log_results(self) -> None:

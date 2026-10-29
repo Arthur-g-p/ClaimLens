@@ -28,13 +28,18 @@ CLI (controllers)  →  Pipelines / Services (orchestration)  →  Workers (exec
 
 ### Foundation modules (leaf dependencies — import nothing from claimlens)
 
-- `settings.py` — env vars, logger factory, prompt loading. Reads eagerly,
-  never crashes on missing config ("Settings reads, Services validate").
-  `resolve_prompts()` lays `--prompts` (a file with only the keys it
-  changes) over the shipped templates. The entry point (CLI or library verb)
-  resolves the path once; every constructor below takes the resulting dict
-  (`None` = shipped), passed down like `concurrency`. `prompts_sha256()` is
-  `_meta.prompts_sha256`.
+- `settings.py` — env vars, logger factory. Reads eagerly, never crashes on
+  missing config ("Settings reads, Services validate").
+- `prompts.py` — the prompt map and everything built from it. Every prompt
+  is `{system, instructions, input}`: the system message, the fixed task and
+  the current case. `resolve_prompts()` lays `--prompts` (a file with only the
+  keys it changes) over the shipped `prompt_map.json` and validates it; the
+  entry point (CLI or library verb) resolves the path once, and every
+  constructor below takes the resulting map as `templates` (`None` = shipped),
+  passed down like `concurrency`. `prompt_messages()` builds the request:
+  system message, then one user message of two blocks (instructions, filled
+  input) — the counterpart of the cache marker in `llmclient.py`.
+  `prompts_sha256()` is `_meta.prompts_sha256`.
 - `exceptions.py` — hierarchy: `ClaimLensError → CLIError / ServiceError
   (InvalidInputError, FilterError) / WorkerError (LLMClientError, ParsingError,
   ContextTooLongError, ContentPolicyError)`. **[UNVERIFIED: exact leaf list]**

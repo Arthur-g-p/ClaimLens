@@ -102,6 +102,9 @@ class TokenStats:
     # Locked request strategy per (endpoint, model), recorded by the client.
     _strategies: dict = field(default_factory=dict)
 
+    # Prompt-cache marker per (endpoint, model): sent | rejected | off.
+    _cache_markers: dict = field(default_factory=dict)
+
     # Thread-Lock for clean counting with async
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -158,11 +161,26 @@ class TokenStats:
     def strategies(self) -> dict[str, str]:
         """{model: strategy name}. A model seen on two endpoints keeps both
         entries, the second keyed with its endpoint appended."""
+        return self._by_model(self._strategies)
+
+    def record_cache_marker(self, model: str, endpoint: str | None, state: str):
+        """Remember whether the prompt-cache marker went out, for report _meta:
+        sent (the endpoint took it), rejected (the probe dropped it) or off
+        (--no-prompt-cache). Off means no marker, not no cache: providers that
+        cache on their own still do."""
+        with self._lock:
+            self._cache_markers[(endpoint, model)] = state
+
+    def cache_markers(self) -> dict[str, str]:
+        """{model: sent | rejected | off}, keyed like strategies()."""
+        return self._by_model(self._cache_markers)
+
+    def _by_model(self, table: dict) -> dict[str, str]:
         out: dict[str, str] = {}
         with self._lock:
-            for (endpoint, model), name in self._strategies.items():
+            for (endpoint, model), value in table.items():
                 key = model if model not in out else f"{model} @ {endpoint or 'litellm'}"
-                out[key] = name
+                out[key] = value
         return out
 
     def log_request(self):

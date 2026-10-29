@@ -27,8 +27,9 @@ from claimlens.exceptions import (
     ContextTooLongError, ContentPolicyError, LLMTimeoutError, FinishReasonLengthError,
 )
 from claimlens.stats import PhaseStats, RoundResult
-from claimlens.utils import format_prompt, plural, prepare_plain_prompt
-from claimlens import settings
+from claimlens.prompts import prepare_plain_prompt, prompt_messages
+from claimlens.utils import plural
+from claimlens import prompts, settings
 
 logger = settings.get_logger(__name__)
 
@@ -64,7 +65,7 @@ class Extractor:
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         retry_rounds: list[RetryRoundConfig] | None = None,
     ):
         self.model = model
@@ -75,8 +76,8 @@ class Extractor:
             concurrency=concurrency,
             prompt_cache=prompt_cache,
         )
-        templates = prompts or settings.PROMPTS
-        self._prompt_template = templates["extractor_prompt"]
+        templates = templates or prompts.PROMPTS
+        self._prompt_template = prompts.prompt(templates, "extractor_prompt")
         self.last_stats: PhaseStats | None = None
 
         key = "extractor_prompt_plain"
@@ -92,11 +93,7 @@ class Extractor:
         template = self._prompt_template
         if prompt_type == "plain" and self._plain_prompt:
             template = self._plain_prompt
-        prompt = format_prompt(template, {"text": text})
-        return [
-            {"role": "system", "content": "Extract knowledge triplets."},
-            {"role": "user", "content": prompt},
-        ]
+        return prompt_messages(template, {"text": text})
 
     def _plain_messages(self, text: str) -> list[dict] | None:
         """None when no plain prompt exists and it is needed — the client WILL fail!"""

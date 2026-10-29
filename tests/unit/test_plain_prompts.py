@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from openai import BadRequestError
 
-from claimlens import settings
+from claimlens import prompts as prompt_map
 from claimlens.exceptions import LLMClientError
-from claimlens.llmclient import LLMClient
+from claimlens.llmclient import _as_strings, LLMClient
 from claimlens.models import (
     AtomizationPayload,
     CheckingPayload,
@@ -74,21 +74,21 @@ class TestExtractor:
         await w.extract_batch([ExtractionPayload(text="Goethe wrote Faust.")])
 
         assert w.client.strategy.name == "Unguided Decoding"
-        assert sent[-1]["messages"] == w._build_messages("Goethe wrote Faust.", "plain")
+        assert _as_strings(sent[-1]["messages"]) == _as_strings(w._build_messages("Goethe wrote Faust.", "plain"))
 
     @pytest.mark.asyncio
     async def test_the_shape_is_substituted_into_the_prompt(self):
         w = Extractor(api_key="k", model="m", base_url=BASE_URL)
-        prompt = w._build_messages("x", "plain")[-1]["content"]
+        prompt = _as_strings(w._build_messages("x", "plain"))[-1]["content"]
 
         assert "{{schema}}" not in prompt
         assert '"subject": "<string>"' in prompt
 
     @pytest.mark.asyncio
     async def test_a_missing_plain_prompt_aborts(self, monkeypatch):
-        prompts = dict(settings.PROMPTS)
-        del prompts["extractor_prompt_plain"]
-        monkeypatch.setattr(settings, "PROMPTS", prompts)
+        templates = dict(prompt_map.PROMPTS)
+        del templates["extractor_prompt_plain"]
+        monkeypatch.setattr(prompt_map, "PROMPTS", templates)
 
         w = Extractor(api_key="k", model="m", base_url=BASE_URL)
         wire(w, '{"triplets": []}')
@@ -107,21 +107,21 @@ class TestChecker:
         await w.check_batch([payload])
 
         assert w.client.strategy.name == "Unguided Decoding"
-        assert sent[-1]["messages"] == w._build_messages("c", ["r"], "plain")
+        assert _as_strings(sent[-1]["messages"]) == _as_strings(w._build_messages("c", ["r"], "plain"))
 
     @pytest.mark.asyncio
     async def test_the_shape_is_substituted_into_the_prompt(self):
         w = Checker(api_key="k", model="m", base_url=BASE_URL)
-        prompt = w._build_messages("c", ["r"], "plain")[-1]["content"]
+        prompt = _as_strings(w._build_messages("c", ["r"], "plain"))[-1]["content"]
 
         assert "{{schema}}" not in prompt
         assert "Entailment | Contradiction | Neutral" in prompt
 
     @pytest.mark.asyncio
     async def test_a_missing_plain_prompt_aborts(self, monkeypatch):
-        prompts = dict(settings.PROMPTS)
-        del prompts["checker_prompt_plain"]
-        monkeypatch.setattr(settings, "PROMPTS", prompts)
+        templates = dict(prompt_map.PROMPTS)
+        del templates["checker_prompt_plain"]
+        monkeypatch.setattr(prompt_map, "PROMPTS", templates)
 
         w = Checker(api_key="k", model="m", base_url=BASE_URL)
         wire(w, '{"explanation": "ok", "verdict": "Entailment"}')
@@ -148,21 +148,21 @@ class TestAtomizer:
         await w.atomize_batch([self._payload()])
 
         assert w.client.strategy.name == "Unguided Decoding"
-        assert sent[-1]["messages"] == w._build_messages(self._payload(), "plain")
+        assert _as_strings(sent[-1]["messages"]) == _as_strings(w._build_messages(self._payload(), "plain"))
 
     @pytest.mark.asyncio
     async def test_the_shape_is_substituted_into_the_prompt(self):
         w = Atomizer(api_key="k", model="m", base_url=BASE_URL)
-        prompt = w._build_messages(self._payload(), "plain")[-1]["content"]
+        prompt = _as_strings(w._build_messages(self._payload(), "plain"))[-1]["content"]
 
         assert "{{schema}}" not in prompt
         assert '"is_atomic": "<boolean>"' in prompt
 
     @pytest.mark.asyncio
     async def test_a_missing_plain_prompt_aborts(self, monkeypatch):
-        prompts = dict(settings.PROMPTS)
-        del prompts["atomizer_prompt_plain"]
-        monkeypatch.setattr(settings, "PROMPTS", prompts)
+        templates = dict(prompt_map.PROMPTS)
+        del templates["atomizer_prompt_plain"]
+        monkeypatch.setattr(prompt_map, "PROMPTS", templates)
 
         w = Atomizer(api_key="k", model="m", base_url=BASE_URL)
         wire(w, '{"reasoning": "r", "is_atomic": true, "split": []}')

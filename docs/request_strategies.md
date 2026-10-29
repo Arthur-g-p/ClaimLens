@@ -226,27 +226,43 @@ Unknown                        → RETRY
 On by default, on both paths, with no setting per endpoint. `--no-prompt-cache`
 switches it off (from Python: `prompt_cache=False`, like `concurrency=`).
 
-**What is sent.** The last system message gets one marker on its last text
-block, and a string content becomes one text block:
+**What is sent.** Every prompt in the prompt map has three parts: `system`,
+the system message; `instructions`, the fixed task that is the same on every
+call; and `input`, the current case with the item placeholders. The user
+message is two text blocks, and the instructions block carries the marker
+(`prompts.prompt_messages` builds it, `llmclient._with_cache_marker` marks it):
 
 ```json
-{"role": "system", "content": [
-  {"type": "text", "text": "<fixed instructions>", "cache_control": {"type": "ephemeral"}}
+{"role": "user", "content": [
+  {"type": "text", "text": "<instructions>", "cache_control": {"type": "ephemeral"}},
+  {"type": "text", "text": "<input, filled with the item>"}
 ]}
 ```
 
 Providers with explicit caching (Claude, Gemini, Qwen behind OpenRouter) cache
-the prompt up to and including that block. `ephemeral` is the only cache type:
-the entry expires about 5 minutes after its last use. Providers that cache on
-their own (OpenAI, DeepSeek, Moonshot, vLLM, SGLang, Ollama) ignore the field.
-They match the longest stored prefix, so only a system message that is
-identical on every request can hit. The item's text belongs after it.
+the request up to and including the marked block. `ephemeral` is the only
+cache type: the entry expires about 5 minutes after its last use. Providers
+that cache on their own (OpenAI, DeepSeek, Moonshot, vLLM, SGLang, Ollama)
+ignore the field. They compare the request token by token from the start and
+reuse the longest identical prefix, which ends where the item begins.
+
+Only `instructions` can be cached, so a prompt caches well when its fixed task
+comes first and the item placeholder last. The shipped checker prompts do;
+the shipped extractor and atomizer prompts put the item almost first (about
+40 and 120 characters of instructions), so they cache nothing until they are
+rewritten. Your own prompts can do better: see `--prompts` in the README.
+
+**Without a marker the request is the old one.** With `--no-prompt-cache`, or
+on an endpoint that rejected the marker, the two blocks are joined into one
+user string: exactly the request a one-string prompt made before the split.
+Off means no marker, not no cache: providers that cache on their own still
+reuse the identical start of the joined string.
 
 **The marker cannot break a run.** If a marked request gets a 400 while the
-endpoint is still unknown, the same request is re-sent without the marker. If
-that succeeds, the endpoint rejects the marker: it is never sent there again
-in this process, and one line says so. If it fails too, the marker was not
-the cause and the error is handled as usual.
+endpoint is still unknown, the same request is re-sent as the joined string.
+If that succeeds, the endpoint rejects the marker (or the block list): it is
+never sent there again in this process, and one line says so. If it fails
+too, the marker was not the cause and the error is handled as usual.
 
 **What is read.** Only the OpenAI-standard field
 `usage.prompt_tokens_details.cached_tokens`. Anything else shows as *cache
@@ -277,7 +293,8 @@ carries on. Known cases:
 - The token table at the end shows each command's cache read:
   `extract:  40 reqs · 312,400 in (298,100 cache read · 95%) · ...`. The
   report's `_meta.usage` carries `cached_tokens`, which is `null` when no
-  response reported it.
+  response reported it, and `_meta.prompt_cache_marker` says per model
+  whether the marker went out: `sent`, `rejected` (by the probe) or `off`.
 
 **What it costs.** A write happens when the prefix is not stored yet. A hit
 reads it and restarts its expiry. Claude bills a write at 1.25× the input

@@ -15,7 +15,7 @@ Pipeline steps:
 
 from pathlib import Path
 
-from claimlens import settings
+from claimlens import prompts, settings
 from claimlens.exceptions import InvalidInputError, FilterError
 from claimlens.services.base import BaseService
 from claimlens.models import ExtractionPayload
@@ -78,7 +78,7 @@ class ExtractionService(BaseService):
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         verbosity: str = "full",
         section_label: str | None = None,
         dedup: bool = True,
@@ -108,14 +108,14 @@ class ExtractionService(BaseService):
         # mix up whose attempt failed.
         self._error_key = error_key or f"{model}_extraction_error"
         self._mark_abstention = mark_abstention
-        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
+        self._templates = templates or prompts.PROMPTS  # resolved at the entry point, passed down
         self._extractor = Extractor(
             api_key=api_key,
             model=model,
             base_url=base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
-            prompts=self._prompts,
+            templates=self._templates,
         )
 
         self._init_verbosity(verbosity, section_label)
@@ -329,7 +329,7 @@ class ExtractionService(BaseService):
             location += f" @ {self.base_url}"
         logger.info(" ⚙️  Config")
         logger.info("    Model:       %s", location)
-        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
+        logger.info("    Prompts:     %s", prompts.describe_prompts(self._templates))
         logger.info("")
 
     def _log_results(

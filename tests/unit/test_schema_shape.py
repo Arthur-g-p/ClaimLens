@@ -10,7 +10,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from claimlens.utils import build_schema_shape
+from claimlens.prompts import build_schema_shape
 from claimlens.workers.checker import JointCheckResult
 from claimlens.workers.extractor import ExtractionResult
 

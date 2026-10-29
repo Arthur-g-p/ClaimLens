@@ -21,7 +21,7 @@ reader's call, made in the HTML report, so one run serves either reading.
 import time
 from datetime import datetime
 
-from claimlens import settings
+from claimlens import prompts, settings
 from claimlens.exceptions import InvalidInputError
 from claimlens.models import DEFAULT_RETRY_ROUNDS, Direction
 from claimlens.services.base import BaseService
@@ -158,7 +158,7 @@ class ComparePipeline(BaseService):
         checker_base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         dedup: bool = True,
         joint: bool = True,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
@@ -186,13 +186,13 @@ class ComparePipeline(BaseService):
         # Compose the services. Each fail-fasts on its own API key here.
         # mark_abstention=False on both: neither text is a response, so an
         # empty extraction says the text states nothing, not that it refused.
-        self._prompts = prompts or settings.PROMPTS  # resolved at the entry point, passed down
+        self._templates = templates or prompts.PROMPTS  # resolved at the entry point, passed down
         extractor_config = dict(
             model=extractor_model,
             base_url=extractor_base_url,
             concurrency=concurrency,
             prompt_cache=prompt_cache,
-            prompts=self._prompts,
+            templates=self._templates,
             verbosity=child_verbosity,
             dedup=dedup,
             mark_abstention=False,
@@ -217,7 +217,7 @@ class ComparePipeline(BaseService):
                 base_url=checker_base_url,
                 concurrency=concurrency,
                 prompt_cache=prompt_cache,
-                prompts=self._prompts,
+                templates=self._templates,
                 joint=joint,
                 joint_num=joint_num,
                 max_words=max_words,
@@ -348,7 +348,9 @@ class ComparePipeline(BaseService):
             evaluated_items=len(items),
             dropped_items=dropped,
             request_strategies=GLOBAL_STATS.strategies(),
-            prompts_sha256=settings.prompts_sha256(self._prompts),
+            prompt_cache_marker=GLOBAL_STATS.cache_markers(),
+            prompts_sha256=prompts.prompts_sha256(self._templates),
+            prompts_overridden=prompts.prompts_overridden(self._templates),
             retry_rounds=describe_retry_rounds(DEFAULT_RETRY_ROUNDS),
             usage=usage_since(getattr(self, "_usage_at_start", None)),
         )
@@ -478,7 +480,7 @@ class ComparePipeline(BaseService):
         logger.info("    Mode:        %s", checking.mode_label)
         logger.info("    Directions:  %s",
                     ", ".join(d.name for d, _ in self._directions))
-        logger.info("    Prompts:     %s", settings.describe_prompts(self._prompts))
+        logger.info("    Prompts:     %s", prompts.describe_prompts(self._templates))
         logger.info("")
 
     def _log_results(self) -> None:

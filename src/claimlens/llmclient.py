@@ -106,31 +106,46 @@ def _describe_error(e: Exception | None) -> str:
     return str(e)[:200]
 
 
-def _with_cache_marker(messages: list[dict] | None) -> tuple[list[dict], int] | None:
-    """Copy of *messages* with the last system message marked cacheable.
+def _text_blocks(content) -> bool:
+    """True for a message content that is a list of text blocks only."""
+    return (isinstance(content, list) and bool(content)
+            and all(isinstance(p, dict) and p.get("type") == "text" for p in content))
 
-    Returns (marked messages, characters in the marked message), or None when
-    there is no system message to mark. The marker is cache_control on the
-    message's last text block, so a string content becomes one text block.
-    Providers that cache on their own ignore the field.
+
+def _with_cache_marker(messages: list[dict] | None) -> tuple[list[dict], int] | None:
+    """Copy of *messages* with the prompt's fixed instructions marked cacheable.
+
+    The counterpart of prompts.prompt_messages, which builds the user message as
+    [instructions, filled input]. The target is the last user message made of
+    two or more text blocks: its second-to-last block — the instructions — gets
+    cache_control, so everything before the item is cached. Returns (marked
+    messages, characters in the cached prefix: everything up to and including
+    the marked block), or None when there is nothing to mark. Providers that cache on their own ignore the field.
     """
     for i in range(len(messages or []) - 1, -1, -1):
         message = messages[i]
-        if message.get("role") != "system":
-            continue
         content = message.get("content")
-        if isinstance(content, str):
-            parts = [{"type": "text", "text": content}]
-        elif (isinstance(content, list) and content and isinstance(content[-1], dict)
-              and content[-1].get("type") == "text"):
-            parts = [dict(p) for p in content]
-        else:
-            return None
-        parts[-1]["cache_control"] = {"type": "ephemeral"}
+        if message.get("role") != "user" or not _text_blocks(content) or len(content) < 2:
+            continue
+        parts = [dict(p) for p in content]
+        parts[-2]["cache_control"] = {"type": "ephemeral"}
         marked = list(messages)
         marked[i] = {**message, "content": parts}
-        return marked, sum(len(p.get("text") or "") for p in parts)
+        before = sum(len(m["content"]) for m in _as_strings(messages[:i])
+                     if isinstance(m.get("content"), str))
+        return marked, before + sum(len(p["text"]) for p in parts[:-1])
     return None
+
+
+def _as_strings(messages: list[dict] | None) -> list[dict] | None:
+    """*messages* with every text-block list joined into one string: the request
+    exactly as before the prompt was split, sent whenever no marker is (caching
+    off, or the endpoint rejected the marker or the block list itself)."""
+    if messages is None:
+        return None
+    return [{**m, "content": "".join(p["text"] for p in m["content"])}
+            if _text_blocks(m.get("content")) else m
+            for m in messages]
 
 
 class ErrorAction(Enum):
@@ -324,6 +339,7 @@ class LLMClient:
         """Record whether this endpoint accepts the cache marker, process-wide."""
         self._cache_marker_supported = accepted
         LLMClient._CACHE_MARKER_CACHE[(self.base_url, self.model)] = accepted
+        GLOBAL_STATS.record_cache_marker(self.model, self.base_url, "sent" if accepted else "rejected")
         if not accepted:
             logger.info("   💾 %s rejected the prompt-cache marker — sending without it.",
                         self.base_url or self.model)
@@ -696,16 +712,22 @@ class LLMClient:
                 # marker_probe = a marked request 400'd and is being re-sent
                 # without it; success then means the endpoint rejects the marker.
                 marker_on = self.prompt_cache and self._cache_marker_supported is not False
+                # What this run did with the marker, for _meta (an unknown
+                # endpoint is recorded once the probe has decided).
+                marker_state = ("off" if not self.prompt_cache
+                                else {True: "sent", False: "rejected"}.get(self._cache_marker_supported))
+                if marker_state:
+                    GLOBAL_STATS.record_cache_marker(self.model, self.base_url, marker_state)
                 marker_probe = False
 
                 while attempt <= max_retries:
                     sent_drop_params = False  # did THIS request carry drop_params?
                     marked = _with_cache_marker(messages) if marker_on else None
                     sent_marker = marked is not None
-                    send_messages = marked[0] if marked else messages
-                    send_plain = plain_messages
+                    send_messages = marked[0] if marked else _as_strings(messages)
+                    send_plain = _as_strings(plain_messages)
                     if marked and plain_messages:
-                        send_plain = (_with_cache_marker(plain_messages) or (plain_messages,))[0]
+                        send_plain = (_with_cache_marker(plain_messages) or (send_plain,))[0]
                     try:
                         if self.base_url:
                             # ── OpenAI SDK Path ────────────────────────────

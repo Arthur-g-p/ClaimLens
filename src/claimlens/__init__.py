@@ -43,7 +43,8 @@ import asyncio
 from pathlib import Path
 from typing import NamedTuple
 
-from claimlens.settings import enable_logging, resolve_prompts
+from claimlens.prompts import resolve_prompts
+from claimlens.settings import enable_logging
 from claimlens.utils import _package_version
 from claimlens.viewer import render_html, write_html
 
@@ -80,11 +81,15 @@ def _args(command: str, params: dict) -> dict:
 
 
 def _with_templates(kwargs: dict) -> dict:
-    """Constructor kwargs with a ``prompts`` file resolved to its templates, as
-    the CLI's --prompts does. The path itself stays in ``_args``."""
-    if kwargs.get("prompts") is None:
+    """Constructor kwargs with the ``prompts`` file resolved to its ``templates``,
+    as the CLI's --prompts does. The path itself stays in ``_args``."""
+    if "templates" in kwargs:
+        raise TypeError("the verbs take prompts= (a prompt file path); templates= "
+                        "is for the pipeline and service classes")
+    if "prompts" not in kwargs:
         return kwargs
-    return {**kwargs, "prompts": resolve_prompts(kwargs["prompts"])}
+    rest = {k: v for k, v in kwargs.items() if k != "prompts"}
+    return {**rest, "templates": resolve_prompts(kwargs["prompts"])}
 
 
 def _report(pipeline, command: str, params: dict) -> Report:

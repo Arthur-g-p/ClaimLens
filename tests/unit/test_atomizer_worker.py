@@ -31,7 +31,9 @@ def _atomizer(**kwargs) -> Atomizer:
     with patch("claimlens.workers.atomizer.LLMClient"):
         a = Atomizer(**defaults)
         # Set a default template for messages rendering
-        a._prompt_template = "subject: {{subject}}, predicate: {{predicate}}, object: {{object}}, response: {{response}}"
+        a._prompt_template = {"system": "Split compound triplets.", "instructions": "Atomize: ",
+                              "input": "subject: {{subject}}, predicate: {{predicate}}, "
+                                       "object: {{object}}, response: {{response}}"}
         return a
 
 
@@ -61,9 +63,11 @@ class TestBuildMessages:
         messages = a._build_messages(p)
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
-        assert "cats" in messages[1]["content"]
-        assert "are" in messages[1]["content"]
-        assert "animals" in messages[1]["content"]
+        instructions, item = messages[1]["content"]
+        assert instructions["text"] == "Atomize: "
+        assert "cats" in item["text"]
+        assert "are" in item["text"]
+        assert "animals" in item["text"]
 
     def test_system_message_content(self):
         a = _atomizer()

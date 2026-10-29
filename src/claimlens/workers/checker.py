@@ -26,8 +26,9 @@ from claimlens.exceptions import (
     FinishReasonLengthError,
 )
 from claimlens.stats import PhaseStats, RoundResult
-from claimlens.utils import format_prompt, plural, prepare_plain_prompt
-from claimlens import settings
+from claimlens.prompts import prepare_plain_prompt, prompt_messages
+from claimlens.utils import plural
+from claimlens import prompts, settings
 
 logger = settings.get_logger(__name__)
 
@@ -126,7 +127,7 @@ class Checker:
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         retry_rounds: list[RetryRoundConfig] | None = None,
         joint_prompt_key: str | None = None,
     ):
@@ -138,10 +139,10 @@ class Checker:
             concurrency=concurrency,
             prompt_cache=prompt_cache,
         )
-        templates = prompts or settings.PROMPTS
-        self._prompt_template = templates["checker_prompt"]
+        templates = templates or prompts.PROMPTS
+        self._prompt_template = prompts.prompt(templates, "checker_prompt")
         joint_key = joint_prompt_key or "checker_prompt_joint"
-        self._joint_prompt_template = templates[joint_key]
+        self._joint_prompt_template = prompts.prompt(templates, joint_key)
         key = "checker_prompt_plain"
         self._plain_prompt = prepare_plain_prompt(
             templates.get(key), key, CheckResult, logger)
@@ -164,14 +165,10 @@ class Checker:
         if prompt_type == "plain" and self._plain_prompt:
             template = self._plain_prompt
 
-        prompt = format_prompt(template, {
+        return prompt_messages(template, {
             "claim": claim,
             "reference": _format_reference(reference),
         })
-        return [
-            {"role": "system", "content": "You are a factual entailment judge."},
-            {"role": "user", "content": prompt},
-        ]
 
     def _plain_messages(self, claim: str, reference: list[str]) -> list[dict] | None:
         """None when no plain prompt exists and it is needed — the client WILL fail!"""
@@ -365,11 +362,7 @@ class Checker:
         if extra_vars:
             template_vars.update(extra_vars)
 
-        prompt = format_prompt(template, template_vars)
-        return [
-            {"role": "system", "content": "You are a factual entailment judge."},
-            {"role": "user", "content": prompt},
-        ]
+        return prompt_messages(template, template_vars)
 
     async def check_joint_batch(
         self,

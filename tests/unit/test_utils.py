@@ -195,3 +195,4 @@ class TestFindDuplicates:
 
     def test_empty(self):
         assert find_duplicate_triplets([]) == []
+

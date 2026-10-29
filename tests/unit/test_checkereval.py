@@ -8,7 +8,7 @@ metric computation, and edge cases (parse errors, empty GT, missing keys).
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from claimlens import settings
+from claimlens import prompts
 from claimlens.eval.checkereval import CheckerEvaluator, LABELS, flatten_verdict
 from claimlens.models import CheckerEvalResult
 
@@ -422,7 +422,7 @@ def _items_evaluator() -> CheckerEvaluator:
     ev._explanation_key = "gpt4o_checker_explanation"
     ev._error_key = "gpt4o_checker_error"
     ev._retry_key = "gpt4o_checker_retry"
-    ev._prompts = settings.resolve_prompts()
+    ev._templates = prompts.resolve_prompts()
     return ev
 
 
@@ -590,7 +590,7 @@ class TestRunDocuments:
         ev._explanation_key = "gpt4o_checker_explanation"
         ev._error_key = "gpt4o_checker_error"
         ev._retry_key = "gpt4o_checker_retry"
-        ev._prompts = settings.resolve_prompts()
+        ev._templates = prompts.resolve_prompts()
         from claimlens.models import Direction
         ev._direction = Direction(name="checker_eval", kg_key="_gt_eval_response_kg",
                                   per_chunk=True, chunks_key="_gt_eval_chunks")

@@ -314,18 +314,27 @@ turns it off). The token table shows each command's cache read. See
 
 `--prompts my_prompts.json` replaces prompt templates for one run, on every
 command. The file holds only the keys you change; every other key comes from
-the shipped [prompt_map.json](src/claimlens/prompt_map.json):
+the shipped [prompt_map.json](src/claimlens/prompt_map.json). Each prompt has
+three parts: `system`, the system message; `instructions`, the fixed task (no
+item placeholders); and `input`, the current case. The instructions are what
+prompt caching reuses:
 
 ```json
-{"extractor_prompt": "…your extractor prompt, with {{text}}…"}
+{"extractor_prompt": {
+  "system": "Extract knowledge triplets.",
+  "instructions": "…your rules, examples and output format…",
+  "input": "Text: {{text}}"
+}}
 ```
 
-An unknown key or broken JSON stops the run before the first request. The
-report's `_args` names the file and `_meta.prompts_sha256` records a hash of
-the full template set in force (the Config block shows it too), so a record
-still says which prompts made it after the file changes. From Python:
-`prompts="my_prompts.json"` on the verbs; the pipeline classes take the resolved
-templates, `prompts=claimlens.settings.resolve_prompts("my_prompts.json")`.
+A broken file, an unknown key, a missing part, a placeholder in `system`, an
+item placeholder in `instructions`, a placeholder nothing fills, or an `input`
+missing one the shipped prompt has stops the run before the first request. The report's `_args` names the file and `_meta.prompts_sha256`
+records a hash of the full template set in force (the Config block shows it
+too), so a record still says which prompts made it after the file changes.
+From Python: `prompts="my_prompts.json"` on the verbs; the pipeline classes
+take the resolved map,
+`templates=claimlens.prompts.resolve_prompts("my_prompts.json")`.
 
 ## Documentation
 

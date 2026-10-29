@@ -28,8 +28,9 @@ from claimlens.exceptions import (
     ContextTooLongError, ContentPolicyError, LLMTimeoutError, FinishReasonLengthError,
 )
 from claimlens.stats import PhaseStats, RoundResult
-from claimlens.utils import format_prompt, plural, prepare_plain_prompt
-from claimlens import settings
+from claimlens.prompts import prepare_plain_prompt, prompt_messages
+from claimlens.utils import plural
+from claimlens import prompts, settings
 
 logger = settings.get_logger(__name__)
 
@@ -73,7 +74,7 @@ class Atomizer:
         base_url: str | None = None,
         concurrency: int = 10,
         prompt_cache: bool = True,
-        prompts: dict[str, str] | None = None,
+        templates: prompts.PromptMap | None = None,
         retry_rounds: list[RetryRoundConfig] | None = None,
     ):
         self.model = model
@@ -84,8 +85,8 @@ class Atomizer:
             concurrency=concurrency,
             prompt_cache=prompt_cache,
         )
-        templates = prompts or settings.PROMPTS
-        self._prompt_template = templates["atomizer_prompt"]
+        templates = templates or prompts.PROMPTS
+        self._prompt_template = prompts.prompt(templates, "atomizer_prompt")
         self.last_stats: PhaseStats | None = None
 
         key = "atomizer_prompt_plain"
@@ -108,16 +109,15 @@ class Atomizer:
         if prompt_type == "plain" and self._plain_prompt:
             template = self._plain_prompt
 
-        prompt = format_prompt(template, {
-            "subject": payload.subject,
-            "predicate": payload.predicate,
-            "object": payload.object,
-            "response": "No context available", # TODO: Temporarily hardcoded because unkown if response is more harmful than helpful. Eval follows
-        })
-        return [
-            {"role": "system", "content": "Split compound triplets into atomic facts. Preserve subject/predicate/object roles exactly."},
-            {"role": "user", "content": prompt},
-        ]
+        return prompt_messages(
+            template,
+            {
+                "subject": payload.subject,
+                "predicate": payload.predicate,
+                "object": payload.object,
+                "response": "No context available", # TODO: Temporarily hardcoded because unkown if response is more harmful than helpful. Eval follows
+            },
+        )
 
     def _plain_messages(self, payload: AtomizationPayload) -> list[dict] | None:
         """None when no plain prompt exists and it is needed — the client WILL fail!"""
