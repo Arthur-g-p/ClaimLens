@@ -96,6 +96,8 @@ class CheckerEvaluator(Evaluator):
     Returns (record, findings) — CLI writes two files verbatim.
     """
 
+    _skip_marked: str | None = None  # set in __init__; None = skip nothing
+
     _RUN_SUMMARY_KEYS = ("accuracy", "macro_f1")
 
     # No behavior section: abstention is a foreign concept here
@@ -134,8 +136,11 @@ class CheckerEvaluator(Evaluator):
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
         runs: int = 1,
+        # Items carrying this key (truthy) are left out: not checked, not compared
+        skip_marked: str | None = None,
     ):
         self._checker_model = checker_model
+        self._skip_marked = skip_marked
         # runs > 1 = variance mode: the evaluator repeats itself; the
         # controller only passes the number through.
         self._runs = max(1, runs)
@@ -255,7 +260,7 @@ class CheckerEvaluator(Evaluator):
             duration_seconds=time.perf_counter() - self._started_perf,
             total_items=total_items,
             evaluated_items=result.total_items,
-            dropped_items=sk["missing_gt"] + sk["missing_context"] + sk["empty_gt"],
+            dropped_items=total_items - result.total_items,
             checking="per_chunk",
             request_strategies=GLOBAL_STATS.strategies(),
             prompt_cache_marker=GLOBAL_STATS.cache_markers(),
@@ -286,6 +291,7 @@ class CheckerEvaluator(Evaluator):
         counts = {
             # 📂 Data
             "data": {
+                "skipped_marked": sk.get("skipped_marked", 0),
                 "dropped_no_gt_claims": sk["missing_gt"],
                 "dropped_no_reference": sk["missing_context"],
                 "dropped_no_labels": sk["empty_gt"],
@@ -321,17 +327,25 @@ class CheckerEvaluator(Evaluator):
 
         An item survives only with all three: gt_key present and non-empty,
         a reference to check against, and at least one triplet carrying a
-        human_label. Skip reasons are counted onto self._skip_counts for the
-        report; zero survivors is fatal.
+        human_label. With ``skip_marked``, an item that carries that key is
+        left out first: it stays in the file, marked, but is neither checked
+        nor compared (e.g. a response cut as out of scope). Skip reasons are
+        counted onto self._skip_counts for the report; zero survivors is fatal.
         """
         evaluable: list[dict] = []
 
+        skipped_marked = 0
         missing_gt = 0
         missing_context = 0
         empty_gt = 0
         total_triplets = 0
 
         for item in data:
+            # 0. Marked items are left out before anything else
+            if self._skip_marked and item.get(self._skip_marked):
+                skipped_marked += 1
+                continue
+
             # 1. Need GT triplets
             if self._gt_key not in item or not item[self._gt_key]:
                 missing_gt += 1
@@ -353,6 +367,7 @@ class CheckerEvaluator(Evaluator):
             evaluable.append(item)
 
         self._skip_counts = {
+            "skipped_marked": skipped_marked,
             "missing_gt": missing_gt,
             "missing_context": missing_context,
             "empty_gt": empty_gt,
@@ -360,10 +375,11 @@ class CheckerEvaluator(Evaluator):
         }
 
         if not evaluable:
-            total_dropped = missing_gt + missing_context + empty_gt
+            total_dropped = skipped_marked + missing_gt + missing_context + empty_gt
             raise InvalidInputError(
                 f"No evaluable items found. All {total_dropped} items were "
-                f"dropped (missing_gt={missing_gt}, missing_context="
+                f"dropped (skipped_marked={skipped_marked}, "
+                f"missing_gt={missing_gt}, missing_context="
                 f"{missing_context}, empty_gt={empty_gt})."
             )
 
@@ -394,6 +410,7 @@ class CheckerEvaluator(Evaluator):
         total_labeled = sum(len(l) for l in gt_labels_map.values())
 
         skip_info = {
+            "skipped_marked": self._skip_counts["skipped_marked"],
             "missing_gt": self._skip_counts["missing_gt"],
             "missing_context": self._skip_counts["missing_context"],
             "empty_gt": self._skip_counts["empty_gt"],
@@ -664,7 +681,10 @@ class CheckerEvaluator(Evaluator):
         dropped_ctx = skip_info["missing_context"]
         dropped_empty = skip_info["empty_gt"]
         unlabeled = skip_info.get("unlabeled_claims", 0)
+        skipped = skip_info.get("skipped_marked", 0)
 
+        if skipped > 0:
+            logger.info("     ├─ skipped:  %d  (marked '%s')", skipped, self._skip_marked)
         if dropped_gt > 0:
             logger.info(
                 "     ├─ dropped:  %d  (GT empty — no labeled claims to compare)", dropped_gt

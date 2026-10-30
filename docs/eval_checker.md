@@ -24,6 +24,7 @@ Input (list[dict])
 
 Ensures the data has the required ground-truth fields for evaluation.
 
+- Skips (`--skip-marked KEY`, e.g. `cut`): Items that carry this key with a truthy value, checked before anything else. The item stays in the input file, is neither checked nor compared, and is counted as `skipped_marked` in `counts.data` and in `_meta.dropped_items`.
 - Drops: Items missing `reference`.
 - Drops: Items missing the specified `gt_key`.
 - Drops: Any individual triplet that lacks a `human_label`. (Items with zero labeled triplets are dropped entirely).
@@ -112,7 +113,7 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
       "_meta": { "...": "...", "run": 1, "duration_seconds": 13.5 },
       "metrics": { "...same keys, this run's values..." },
       "counts": {
-        "data":     { "dropped_no_gt_claims": 1, "dropped_no_reference": 0, "dropped_no_labels": 0, "unlabeled_claims": 0, "checks": 1160 },
+        "data":     { "skipped_marked": 0, "dropped_no_gt_claims": 1, "dropped_no_reference": 0, "dropped_no_labels": 0, "unlabeled_claims": 0, "checks": 1160 },
         "verdicts": { "labeled": 116, "correct": 98, "wrong": 18, "unjudged": 0 },
         "labels":   { "Entailment": 113, "Contradiction": 0, "Neutral": 3 },
         "per_label": { "Entailment": { "precision": 1.0, "recall": 0.841, "f1": 0.913, "total": 113 },

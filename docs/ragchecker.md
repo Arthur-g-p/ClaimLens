@@ -366,6 +366,34 @@ punished, ignored or only flagged is not decided. Until it is, read
 `noise_sensitivity` and `hallucination` with this in mind when the system
 under test is a talkative one.
 
+**How we handle it for now: we extract each fact.** This is decided in the
+extraction catalogue (claimlens-gt, card `abstention`):
+
+- **The refusal gives no claim.** A sentence that says the response or its
+  passages leave the question open is not scored: "I can't say what the
+  surface is made of", "the passages do not say whether …", "there is no
+  information on …", "more data would be needed to be sure". The test: is
+  the sentence about the response itself (its author, its passages, the
+  conclusion it draws), and does it say that something is missing or
+  unsettled? A sentence that could stand unchanged in a reference answer is
+  about the topic, and a claim.
+- **Every fact around it is extracted and scored as usual.** In the partial
+  row, the distance is one claim. What a passage is said to state is the
+  response's own claim ("Passage 2 notes that it is about 600 ly away" gives
+  the distance). Volunteered facts are therefore scored like any other
+  claim; they are not dropped and not merely flagged.
+- **Doubt about the world is a claim.** "Kepler-22b's surface composition is
+  unknown" is checked like any other statement.
+- **What this means for the scores.**
+  - An unanswered question costs recall only: what the gt has and the
+    response lacks.
+  - An honest refusal earns nothing, and an unjustified one costs only
+    recall.
+  - A response that only abstains gives no claims and stays a simple
+    abstention.
+- **Unchanged in the code:** the Abstention Behavior block still sees only
+  responses without claims. A partial refusal is not counted there.
+
 ### Answers without claims (unsolved)
 
 The reverse case exists too: a response with content from which no claims

@@ -654,6 +654,10 @@ def eval_checker(
     runs: int = typer.Option(
         1, "--runs", help="Repeat the whole eval N times and report variance (N x LLM cost)."
     ),
+    skip_marked: str = typer.Option(
+        None, "--skip-marked",
+        help="Leave out items that carry this key (e.g. 'cut'): not checked, not compared, counted as skipped.",
+    ),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark each prompt's fixed instructions as cacheable (cache_control). On by default."),
     prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
@@ -693,6 +697,7 @@ def eval_checker(
             joint_num=joint_num,
             max_words=max_words,
             runs=runs,
+            skip_marked=skip_marked,
         )
         record, findings = evaluator.run_sync(data)
         _args = _capture_args(ctx, "eval checker")

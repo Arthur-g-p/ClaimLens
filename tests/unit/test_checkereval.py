@@ -188,6 +188,63 @@ class TestPrepareGt:
         assert skip["unlabeled_claims"] == 2  # 2 triplets without human_label
 
 
+class TestSkipMarked:
+    """--skip-marked leaves marked items out before any other check: they
+    stay in the file, but are neither checked nor compared."""
+
+    def _evaluator(self, skip_marked=None):
+        ev = CheckerEvaluator.__new__(CheckerEvaluator)
+        ev._gt_key = "claude2_response_kg"
+        ev._skip_marked = skip_marked
+        return ev
+
+    def _cut(self, **kw):
+        return _make_gt_item([("a", "b", "c")], ["Entailment"],
+                             extra_keys={"id": "cut", "cut": ["D-014 context missing"]}, **kw)
+
+    def test_marked_items_skipped(self, sample_items):
+        ev = self._evaluator("cut")
+        evaluable, gt_map, skip = ev._prepare_gt([self._cut(), *sample_items])
+        assert len(evaluable) == 3
+        assert all("cut" not in i for i in evaluable)
+        assert skip["skipped_marked"] == 1
+
+    def test_marked_items_kept_without_skip_marked(self, sample_items):
+        ev = self._evaluator()
+        evaluable, _, skip = ev._prepare_gt([self._cut(), *sample_items])
+        assert len(evaluable) == 4
+        assert skip["skipped_marked"] == 0
+
+    def test_mark_wins_over_other_drop_reasons(self, sample_items):
+        """A marked item without a reference is skipped, not dropped."""
+        ev = self._evaluator("cut")
+        _, _, skip = ev._prepare_gt([self._cut(reference=""), *sample_items])
+        assert (skip["skipped_marked"], skip["missing_context"]) == (1, 0)
+
+    def test_falsy_mark_is_not_a_mark(self, sample_items):
+        ev = self._evaluator("cut")
+        item = self._cut()
+        item["cut"] = []
+        evaluable, _, skip = ev._prepare_gt([item, *sample_items])
+        assert len(evaluable) == 4
+        assert skip["skipped_marked"] == 0
+
+    def test_skipped_marked_not_counted_as_unlabeled_claims(self, sample_items):
+        ev = self._evaluator("cut")
+        _, _, skip = ev._prepare_gt([self._cut(), *sample_items])
+        assert skip["unlabeled_claims"] == 0
+
+    def test_all_marked_is_fatal_and_names_the_skip(self):
+        from claimlens.exceptions import InvalidInputError
+        ev = self._evaluator("cut")
+        with pytest.raises(InvalidInputError, match="skipped_marked=1"):
+            ev._prepare_gt([self._cut()])
+
+    def test_constructor_takes_skip_marked(self):
+        assert CheckerEvaluator("gpt4o", skip_marked="cut")._skip_marked == "cut"
+        assert CheckerEvaluator("gpt4o")._skip_marked is None
+
+
 # ── Test _prepare_for_service ────────────────────────────────────────────────
 
 class TestPrepareForService:
@@ -541,6 +598,24 @@ class TestRunDocuments:
                   "gpt4o_checker_verdict": None, "gpt4o_checker_error": "timeout"},
              ]},
         ]
+
+    def test_skipped_marked_in_counts_and_dropped_items(self):
+        import time
+        ev = _items_evaluator()
+        ev._started_at = "2026-01-01T00:00:00"
+        ev._started_perf = time.perf_counter()
+        skip = {"missing_gt": 1, "missing_context": 0, "empty_gt": 0,
+                "unlabeled_claims": 0, "skipped_marked": 2}
+        result = ev._build_result(
+            ["Entailment", "Entailment", "Neutral"],
+            ["Entailment", "Neutral", "Neutral"], 1, 2, skip)
+        gt_map = {0: {0: "Entailment", 1: "Entailment"}, 1: {0: "Neutral", 1: "Neutral"}}
+
+        run_doc, _ = ev._run_documents(result, self._evaluable(), gt_map, total_items=5)
+
+        assert run_doc["counts"]["data"]["skipped_marked"] == 2
+        meta = run_doc["_meta"]
+        assert (meta["total_items"], meta["evaluated_items"], meta["dropped_items"]) == (5, 2, 3)
 
     def test_run_documents_shape_and_reconciliation(self):
         import time
