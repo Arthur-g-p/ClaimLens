@@ -32,11 +32,18 @@ REQUIRED_KEYS = (
     "extractor_prompt", "extractor_prompt_plain",
     "checker_prompt", "checker_prompt_plain",
     "checker_prompt_joint", "checker_prompt_joint_plain",
-    "checker_prompt_eval_joint", "checker_prompt_eval_joint_plain",
+    "claim_match_prompt", "claim_match_prompt_plain",
     "atomizer_prompt", "atomizer_prompt_plain",
 )
 """Every key the code reads. The shipped map must hold all of them; a --prompts
 file holds any subset, the shipped prompt filling each key it leaves out."""
+
+RENAMED_KEYS = {
+    "checker_prompt_eval_joint": "claim_match_prompt",
+    "checker_prompt_eval_joint_plain": "claim_match_prompt_plain",
+}
+"""Old key → current key. A prompt file written before a rename still loads:
+its old keys are read as the current ones, with a warning."""
 
 _PLACEHOLDER = re.compile(r"\{\{\w+\}\}")
 _ITEM_PLACEHOLDER = re.compile(r"\{\{(?!schema\}\})\w+\}\}")
@@ -103,6 +110,13 @@ def resolve_prompts(path: str | Path | None = None) -> PromptMap:
         raise ValueError(f"Prompt file {path} is not valid JSON: {exc}") from exc
     if not isinstance(overrides, dict):
         raise ValueError(f"{label}: expected a JSON object of {{key: {{system, instructions, input}}}}")
+    renamed = [k for k in overrides if k in RENAMED_KEYS]
+    for old in renamed:
+        new = RENAMED_KEYS[old]
+        if new in overrides:
+            raise ValueError(f'{label}: holds both "{old}" and its current name "{new}"')
+        logging.getLogger(__name__).warning('%s: prompt key "%s" is now "%s"; read as such', label, old, new)
+        overrides[new] = overrides.pop(old)
     unknown = sorted(set(overrides) - set(PROMPTS))
     if unknown:
         raise ValueError(f"{label}: unknown prompt key(s) {', '.join(unknown)}. "

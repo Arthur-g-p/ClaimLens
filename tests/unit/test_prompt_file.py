@@ -102,6 +102,17 @@ class TestResolve:
         with pytest.raises(ValueError, match="Prompt file not found"):
             resolve_prompts(tmp_path / "nope.json")
 
+    def test_an_old_key_is_read_under_its_new_name(self, tmp_path):
+        mine = _prompt("Match: ", prompts.PROMPTS["claim_match_prompt"]["input"])
+        p = resolve_prompts(_write(tmp_path, {"checker_prompt_eval_joint": mine}))
+        assert p["claim_match_prompt"] == mine
+        assert "checker_prompt_eval_joint" not in p
+
+    def test_an_old_key_next_to_its_new_name_fails(self, tmp_path):
+        mine = _prompt("Match: ", prompts.PROMPTS["claim_match_prompt"]["input"])
+        with pytest.raises(ValueError, match="its current name"):
+            resolve_prompts(_write(tmp_path, {"checker_prompt_eval_joint": mine, "claim_match_prompt": mine}))
+
     def test_the_shipped_map_holds_every_required_key(self):
         assert set(prompts.REQUIRED_KEYS) <= set(prompts.PROMPTS)
 

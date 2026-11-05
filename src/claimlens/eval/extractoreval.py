@@ -821,7 +821,7 @@ class ExtractorEvaluator(Evaluator):
         Pass 2 (Pred → GT): Pred triplets as claims, GT triplets as reference.
             Non-Entailment = hallucinated/wrong prediction (contributes to FP).
 
-        Uses checker_prompt_eval_joint. The response text is withheld on
+        Uses claim_match_prompt. The response text is withheld on
         purpose: given it, the matcher matched claims that had no counterpart
         on the other side (docs/eval_extractor.md, "Why the matcher never
         sees the response").
@@ -840,7 +840,7 @@ class ExtractorEvaluator(Evaluator):
             max_words=self._max_words,
             verbosity="silent" if self._runs > 1 else "compact",
             section_label="Matching pass 1: GT → Pred (recall)",
-            joint_prompt_key="checker_prompt_eval_joint",
+            joint_prompt_key="claim_match_prompt",
         )
 
         # ── Pass 1: GT → Pred (recall / FN detection) ──────────
@@ -868,7 +868,7 @@ class ExtractorEvaluator(Evaluator):
             max_words=self._max_words,
             verbosity="silent" if self._runs > 1 else "compact",
             section_label="Matching pass 2: Pred → GT (precision)",
-            joint_prompt_key="checker_prompt_eval_joint",
+            joint_prompt_key="claim_match_prompt",
         )
 
         await service2.run(pass2_items)
