@@ -30,6 +30,7 @@ PARTS = ("system", "instructions", "input")
 
 REQUIRED_KEYS = (
     "extractor_prompt", "extractor_prompt_plain",
+    "extractor_prompt_question", "extractor_prompt_question_plain",
     "checker_prompt", "checker_prompt_plain",
     "checker_prompt_joint", "checker_prompt_joint_plain",
     "claim_match_prompt", "claim_match_prompt_plain",

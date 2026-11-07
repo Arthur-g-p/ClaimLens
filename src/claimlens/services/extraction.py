@@ -3,10 +3,12 @@ Extraction service — orchestrates the extract pipeline.
 
 Pipeline steps:
 0. Canonicalize: Normalize key aliases (context→reference, query→question).
-1. Validation: Ensures API key is configured and input data has 'response' keys.
+1. Validation: Ensures API key is configured and input data has 'response' keys
+   (and, with question_if, a question for every item marked true).
 2. Filtering:  Skips items that already contain a {model}_response_kg key.
 3. Pre-filter: Detects full abstentions to avoid wasting LLM calls.
-4. Payloading: Builds ExtractionPayload list for the worker.
+4. Payloading: Builds ExtractionPayload list for the worker (with the question
+   for marked items, so the worker uses the question prompt).
 5. Execution:  Delegates to the Extractor worker (async).
 6. Serialization: Writes extracted triplets back into the dicts.
 7. Reporting:  Logs validation, skip, config, results, and done line.
@@ -86,6 +88,7 @@ class ExtractionService(BaseService):
         kg_key: str | None = None,
         error_key: str | None = None,
         mark_abstention: bool = True,
+        question_if: str | None = None,
     ):
         """Defaults reproduce classic behavior: extract from 'response' into
         {model}_response_kg. Pipelines override source_key/kg_key/error_key to
@@ -94,6 +97,10 @@ class ExtractionService(BaseService):
         mark_abstention: write is_abstention/abstention_source on empty
         results. Disable when the source is not the response (an empty GT
         extraction says nothing about response abstention).
+
+        question_if: an item whose value under this key is true (only true
+        counts) is extracted with its question, through the question prompt;
+        every other item exactly as before. Off by default (None or "").
         """
         # Fail-fast: validate config before creating any workers.
         api_key = self._require_api_key(
@@ -108,6 +115,7 @@ class ExtractionService(BaseService):
         # mix up whose attempt failed.
         self._error_key = error_key or f"{model}_extraction_error"
         self._mark_abstention = mark_abstention
+        self._question_if = question_if or None
         self._templates = templates or prompts.PROMPTS  # resolved at the entry point, passed down
         self._extractor = Extractor(
             api_key=api_key,
@@ -133,6 +141,15 @@ class ExtractionService(BaseService):
     @property
     def kg_key(self) -> str:
         return self._kg_key
+
+    @property
+    def question_if(self) -> str | None:
+        """The key whose value true selects the question prompt (None = off)."""
+        return self._question_if
+
+    def is_marked(self, item: dict) -> bool:
+        """Is *item* extracted with its question? Only the value true counts."""
+        return self._question_if is not None and item.get(self._question_if) is True
 
     # ── Public API ───────────────────────────────────────────────
 
@@ -160,10 +177,12 @@ class ExtractionService(BaseService):
                 logger.info(" ✨ All items already processed. Nothing to extract.")
             return data
 
-        self._log_config()
+        self._log_config(sum(self.is_marked(item) for item in pending), len(pending))
 
-        # Build payloads only for pending items
-        payloads = [ExtractionPayload(text=item[self.source_key]) for item in pending]
+        # Build payloads only for pending items; a marked item carries its question
+        payloads = [ExtractionPayload(text=item[self.source_key],
+                                      question=item["question"] if self.is_marked(item) else None)
+                    for item in pending]
 
         # Execute — fatal errors (auth, connection) propagate to CLI
         if self.verbosity != "silent":
@@ -204,15 +223,25 @@ class ExtractionService(BaseService):
     # ── Pipeline steps (private) ─────────────────────────────────
 
     def _validate(self, data: list[dict]) -> list[dict]:
-        """Step 1: Drop items missing the source key (default 'response')."""
+        """Step 1: Drop items missing the source key (default 'response'), and
+        items marked for the question prompt that have no question."""
         valid = []
+        self._dropped_no_question = 0
         for i, item in enumerate(data):
             if self.source_key not in item:
                 logger.debug("Item %d has no '%s' key — skipping.", i, self.source_key)
                 continue
+            if self.is_marked(item) and not str(item.get("question") or "").strip():
+                logger.debug("Item %d is marked '%s' but has no 'question' — skipping.", i, self._question_if)
+                self._dropped_no_question += 1
+                continue
             valid.append(item)
 
         if not valid:
+            if self._dropped_no_question:
+                raise InvalidInputError(
+                    f"No items to extract: {self._dropped_no_question} marked '{self._question_if}' "
+                    f"without a 'question', the rest without a '{self.source_key}' key.")
             raise InvalidInputError(f"No items contain a '{self.source_key}' key.")
         return valid
 
@@ -298,11 +327,14 @@ class ExtractionService(BaseService):
         """Print 📂 Validation section (full only — pipelines own the preamble)."""
         if self.verbosity != "full":
             return
-        invalid = total - valid
+        no_question = getattr(self, "_dropped_no_question", 0)
+        invalid = total - valid - no_question
         logger.info(" 📂 Validation")
         logger.info("    Total:        %d items", total)
         if invalid > 0:
             logger.info("     ├─ dropped:  %d  (no '%s' key)", invalid, self.source_key)
+        if no_question > 0:
+            logger.info("     ├─ dropped:  %d  (marked '%s', no 'question')", no_question, self._question_if)
         if abstained > 0:
             logger.info("     ├─ abstain:  %d  (heuristic: empty/refusal response)", abstained)
         logger.info("     └─ valid:    %d items", valid - abstained)
@@ -320,8 +352,9 @@ class ExtractionService(BaseService):
         logger.info("     └─ pending:  %d items", pending)
         logger.info("")
 
-    def _log_config(self) -> None:
-        """Print ⚙️  Config section."""
+    def _log_config(self, marked: int = 0, pending: int = 0) -> None:
+        """Print ⚙️  Config section. The Question line shows only when pending
+        items get the question prompt."""
         if self.verbosity != "full":
             return
         location = f"{self.model}"
@@ -330,6 +363,9 @@ class ExtractionService(BaseService):
         logger.info(" ⚙️  Config")
         logger.info("    Model:       %s", location)
         logger.info("    Prompts:     %s", prompts.describe_prompts(self._templates))
+        if marked:
+            logger.info("    Question:    %d of %d items get the question prompt ('%s')",
+                        marked, pending, self._question_if)
         logger.info("")
 
     def _log_results(

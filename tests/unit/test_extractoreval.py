@@ -1082,3 +1082,117 @@ class TestLogEvalResultsSmoke:
             "compared", "abstention_misread", "answer_missed", "abstention_recognized"}
         assert run_doc["counts"]["reliability"]["atomization"] == {
             "measured": False, "reason": "no --atomizer-model"}
+
+
+class TestQuestionIf:
+    """--question-if in the eval: a marked item without a question is dropped
+    and counted; an item extracted with the question carries question_given."""
+
+    def _run(self, ev, data):
+        ev._match_all_llm = AsyncMock(side_effect=lambda items: [
+            _ItemMatchResult(tp_recall=1, tp_precision=1, fp=0, fn=0,
+                             false_positives=[], false_negatives=[]) for _ in items])
+
+        async def mock_run(items):
+            for item in items:
+                item[PRED_KEY] = [_make_canonical_triplet("a", "b", "c")]
+
+        ev._extraction_service.run = AsyncMock(side_effect=mock_run)
+        with patch.object(ev, "_log_data_pre"), patch.object(ev, "_log_eval_config"), \
+             patch.object(ev, "_log_eval_results"), patch.object(ev, "_log_done"):
+            return ev.run_sync(data)
+
+    def _item(self, item_id, **extra):
+        item = _make_item(gt_triplets=[_make_triplet("a", "b", "c")], item_id=item_id)
+        item.update(extra)
+        return item
+
+    def test_off_by_default_and_passed_through(self):
+        with patch("claimlens.eval.extractoreval.ExtractionService") as cls:
+            ExtractorEvaluator(extractor_model="test-model", gt_key=GT_KEY, checker_model="c")
+        assert cls.call_args.kwargs["question_if"] is None
+        with patch("claimlens.eval.extractoreval.ExtractionService") as cls:
+            ExtractorEvaluator(extractor_model="test-model", gt_key=GT_KEY, checker_model="c",
+                               question_if="needs_question")
+        assert cls.call_args.kwargs["question_if"] == "needs_question"
+
+    def test_marked_without_question_dropped(self):
+        ev = _evaluator(question_if="needs_question")
+        no_q = self._item("x", needs_question=True)
+        del no_q["question"]
+        valid = ev._validate([no_q, self._item("y", needs_question=True), self._item("z")])
+        assert [i["id"] for i in valid] == ["y", "z"]
+        assert ev._dropped_missing_question == 1
+
+    def test_without_the_option_nothing_is_dropped(self):
+        ev = _evaluator()
+        no_q = self._item("x", needs_question=True)
+        del no_q["question"]
+        assert len(ev._validate([no_q])) == 1
+
+    def test_record_counts_and_question_given(self):
+        ev = _evaluator(question_if="needs_question")
+        no_q = self._item("x", needs_question=True)
+        del no_q["question"]
+        record, _ = self._run(ev, [no_q, self._item("y", needs_question=True),
+                                   self._item("z", needs_question=False)])
+        run = record["runs"][0]
+        assert run["counts"]["data"]["dropped_no_question"] == 1
+        by_id = {i["id"]: i for i in run["items"]}
+        assert by_id["y"]["question_given"] is True
+        assert "question_given" not in by_id["z"]
+        assert set(by_id) == {"y", "z"}
+
+    def test_data_block_line(self, caplog):
+        import logging
+        ev = _evaluator(question_if="needs_question")
+        ev._dropped_missing_question = 2
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            ev._log_data_pre(5, 2, 3)
+        assert "├─ dropped:  2  (marked 'needs_question', no 'question')" in caplog.text
+
+    def test_config_line(self, caplog):
+        import logging
+        ev = _evaluator(question_if="needs_question")
+        ev._extraction_service.base_url = None
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            ev._log_eval_config([{"needs_question": True}, {"needs_question": False}, {}])
+        assert "Question:    1 of 3 items get the question prompt ('needs_question')" in caplog.text
+
+
+class TestQuestionIfCli:
+
+    def _invoke(self, tmp_path, monkeypatch, command, target, *extra):
+        import json
+        from typer.testing import CliRunner
+        from claimlens.cli import app
+        seen = {}
+
+        class _Built:
+            def __init__(self, **kwargs):
+                seen.update(kwargs)
+
+            def run_sync(self, data):
+                return data
+
+        monkeypatch.setattr(target, _Built)
+        src = tmp_path / "d.json"
+        src.write_text(json.dumps([{"response": "r", "question": "q"}]))
+        models = ["-m", "m"] if command == ["extract"] else ["-e", "e", "--checker-model", "c"]
+        CliRunner().invoke(app, [*command, str(src), *models, "-o", str(tmp_path / "o.json"), *extra])
+        assert seen, "the command did not build its service"
+        return seen
+
+    @pytest.mark.parametrize("command, target", [
+        (["extract"], "claimlens.services.extraction.ExtractionService"),
+        (["eval", "extractor"], "claimlens.eval.extractoreval.ExtractorEvaluator"),
+    ])
+    def test_default_and_off(self, tmp_path, monkeypatch, command, target):
+        assert self._invoke(tmp_path, monkeypatch, command, target)["question_if"] == "needs_question"
+        assert self._invoke(tmp_path, monkeypatch, command, target, "--question-if", "")["question_if"] == ""
+
+    @pytest.mark.parametrize("command", ["refcheck", "ragcheck", "faithcheck", "compare"])
+    def test_other_commands_have_no_option(self, command):
+        from typer.testing import CliRunner
+        from claimlens.cli import app
+        assert "--question-if" not in CliRunner().invoke(app, [command, "--help"], terminal_width=200).output

@@ -49,6 +49,7 @@ flowchart LR
 |----------|-------|---------|
 | Item has `"response"` key | `{"response": "Paris is in France"}` | ✅ Passes validation |
 | Item missing `"response"` | `{"question": "Where is Paris?"}` | ⚠️ Skipped with warning log |
+| Item marked by `--question-if` (e.g. `"needs_question": true`) without a `"question"` | `{"response": "Yes.", "needs_question": true}` | ⚠️ Dropped, counted on its own 📂 Validation line (`marked 'needs_question', no 'question'`) |
 | ALL items missing `"response"` | `[{"q": "..."}, {"a": "..."}]` | ❌ `InvalidInputError` — hard stop |
 | Empty list `[]` | `[]` | ❌ `InvalidInputError` — hard stop |
 
@@ -141,6 +142,20 @@ Everything that isn't already processed and isn't an abstention.
 ## What gets sent to the LLM
 
 Only **pending** items. Each one becomes an `ExtractionPayload(text=item["response"])` and goes through the `Extractor` worker.
+
+**With the question (`--question-if KEY`, on `extract` and `eval extractor`, default `needs_question`).**
+An item whose value under `KEY` is `true` (only `true` counts; a missing key,
+`false` or the string `"true"` do not) also gets `question=item["question"]`
+on its payload, and the worker fills `extractor_prompt_question` (or
+`extractor_prompt_question_plain` in the plain fallback and the plain retry
+round) with `{"text": …, "question": …}`. It is for responses that need their
+question to be read: a bare answer ("About 11 months."), a polar "Yes."/"No.",
+a subject only the question names. Every other item gets the text-only
+`extractor_prompt`, exactly as without the option. `--question-if ""` turns it
+off; `ExtractionService` itself is off by default (`question_if=None`), so the
+pipelines are unchanged. When pending items get the question prompt, ⚙️ Config
+says how many (`Question:    7 of 100 items get the question prompt ('needs_question')`).
+Nothing new is written to the item.
 
 ## What gets written back
 

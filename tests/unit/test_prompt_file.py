@@ -354,3 +354,29 @@ class TestEntryPoints:
         assert seen["templates"]["extractor_prompt"] == MINE["extractor_prompt"]
         assert "prompts" not in seen
         assert record["_args"]["prompts"] == str(path)
+
+
+class TestQuestionPromptKeys:
+    """extractor_prompt_question[_plain]: required in the shipped map, overridable."""
+
+    KEYS = ("extractor_prompt_question", "extractor_prompt_question_plain")
+
+    def test_required(self):
+        assert set(self.KEYS) <= set(prompts.REQUIRED_KEYS)
+
+    def test_shipped_inputs_carry_question_and_text(self):
+        for key in self.KEYS:
+            found = set(prompts._ITEM_PLACEHOLDER.findall(prompts.PROMPTS[key]["input"]))
+            assert found == {"{{question}}", "{{text}}"}
+
+    def test_prompt_file_can_override(self, tmp_path):
+        mine = {"extractor_prompt_question": {"system": "S", "instructions": "I",
+                                              "input": "{{question}} {{text}}"}}
+        resolved = prompts.resolve_prompts(_write(tmp_path, mine))
+        assert resolved["extractor_prompt_question"] == mine["extractor_prompt_question"]
+        assert prompts.prompts_overridden(resolved) == ["extractor_prompt_question"]
+
+    def test_override_without_question_refused(self, tmp_path):
+        mine = {"extractor_prompt_question": {"system": "S", "instructions": "I", "input": "{{text}}"}}
+        with pytest.raises(ValueError, match="question"):
+            prompts.resolve_prompts(_write(tmp_path, mine))

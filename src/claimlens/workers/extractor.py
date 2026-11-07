@@ -1,7 +1,10 @@
 """
 Extractor worker — async execution unit for knowledge graph extraction.
 
-Takes text in, sends it to an LLM, parses triplets out.
+Takes text in, sends it to an LLM, parses triplets out. A payload that
+carries a question (an item marked by --question-if) is sent with the
+question prompt instead, filled with both; every other payload with the
+text-only prompt.
 Owns no validation, filtering, or orchestration logic.
 The service layer handles all of that before calling us.
 
@@ -78,28 +81,41 @@ class Extractor:
         )
         templates = templates or prompts.PROMPTS
         self._prompt_template = prompts.prompt(templates, "extractor_prompt")
+        self._question_template = prompts.prompt(templates, "extractor_prompt_question")
         self.last_stats: PhaseStats | None = None
 
         key = "extractor_prompt_plain"
         self._plain_prompt = prepare_plain_prompt(
+            templates.get(key), key, ExtractionResult, logger)
+        key = "extractor_prompt_question_plain"
+        self._question_plain_prompt = prepare_plain_prompt(
             templates.get(key), key, ExtractionResult, logger)
 
         self._retry_rounds = retry_rounds or DEFAULT_RETRY_ROUNDS
 
     # ── Message builders ─────────────────────────────────────────
 
-    def _build_messages(self, text: str, prompt_type: str = "standard") -> list[dict]:
-        """Build chat messages for a single extraction call."""
+    def _build_messages(
+        self, text: str, prompt_type: str = "standard", question: str | None = None,
+    ) -> list[dict]:
+        """Build chat messages for a single extraction call: the question
+        prompt when there is a question, the text-only prompt otherwise."""
+        if question is not None:
+            template = self._question_template
+            if prompt_type == "plain" and self._question_plain_prompt:
+                template = self._question_plain_prompt
+            return prompt_messages(template, {"text": text, "question": question})
         template = self._prompt_template
         if prompt_type == "plain" and self._plain_prompt:
             template = self._plain_prompt
         return prompt_messages(template, {"text": text})
 
-    def _plain_messages(self, text: str) -> list[dict] | None:
+    def _plain_messages(self, text: str, question: str | None = None) -> list[dict] | None:
         """None when no plain prompt exists and it is needed — the client WILL fail!"""
-        if not self._plain_prompt:
+        plain = self._plain_prompt if question is None else self._question_plain_prompt
+        if not plain:
             return None
-        return self._build_messages(text, "plain")
+        return self._build_messages(text, "plain", question)
 
     def _build_task(self, payload: ExtractionPayload, round_config: RetryRoundConfig | None = None) -> dict:
         """Build a generate_batch task dict for one item.
@@ -108,15 +124,15 @@ class Extractor:
         None means first pass (standard prompt, temp 0.0).
         """
         if round_config is None:
-            messages = self._build_messages(payload.text)
+            messages = self._build_messages(payload.text, question=payload.question)
             temperature = 0.0
         else:
-            messages = self._build_messages(payload.text, round_config.prompt)
+            messages = self._build_messages(payload.text, round_config.prompt, payload.question)
             temperature = round_config.temperature
 
         return {
             "messages": messages,
-            "plain_messages": self._plain_messages(payload.text),
+            "plain_messages": self._plain_messages(payload.text, payload.question),
             "schema": ExtractionResult,
             "temperature": temperature,
         }
@@ -129,7 +145,7 @@ class Extractor:
         Raises ContextTooLongError, ContentPolicyError, or ParsingError
         on per-item failures. Raises LLMClientError on fatal failures.
         """
-        messages = self._build_messages(payload.text)
+        messages = self._build_messages(payload.text, question=payload.question)
         raw = await self.client.generate(
             messages=messages,
             schema=ExtractionResult,

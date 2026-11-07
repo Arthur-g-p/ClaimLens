@@ -169,6 +169,9 @@ class ExtractorEvaluator(Evaluator):
         runs: int = 1,
         # Items carrying this key (truthy) are left out: not extracted, not matched
         skip_marked: str | None = None,
+        # Items whose value under this key is true are extracted with their
+        # question (the question prompt); None / "" = off
+        question_if: str | None = None,
     ):
         if not checker_model:
             raise ValueError("checker_model is required for evaluation matching.")
@@ -176,6 +179,7 @@ class ExtractorEvaluator(Evaluator):
         self._extractor_model = extractor_model
         self._gt_key = gt_key
         self._skip_marked = skip_marked
+        self._question_if = question_if or None
         # runs > 1 = variance mode: the evaluator repeats itself; the
         # controller only passes the number through.
         self._runs = max(1, runs)
@@ -209,6 +213,7 @@ class ExtractorEvaluator(Evaluator):
             templates=self._templates,
             verbosity="silent" if self._runs > 1 else "compact",
             dedup=False,
+            question_if=self._question_if,
         )
 
         # LLM config — CheckingService built on demand in _match_all_llm
@@ -275,7 +280,7 @@ class ExtractorEvaluator(Evaluator):
         # Pre-extraction logging
         if announce:
             self._log_data_pre(len(data), len(data) - len(valid), len(valid))
-            self._log_eval_config()
+            self._log_eval_config(valid)
 
         # Step 2: Run extraction (quiet — evaluator owns the logging)
         await self._extraction_service.run(valid)
@@ -319,6 +324,11 @@ class ExtractorEvaluator(Evaluator):
         # Step 8: Assemble this run's documents. The CLI only resolves
         # paths and dumps JSON — it never composes content.
         return self._run_documents(result, buckets, item_results, len(data))
+
+    def _gets_question(self, item: dict) -> bool:
+        """Extracted with its question? The same rule as ExtractionService.is_marked:
+        only the value true counts."""
+        return self._question_if is not None and item.get(self._question_if) is True
 
     def _unmeasured(self) -> dict | None:
         """Atomicity axis not run → its three keys are unmeasured, not 0/0."""
@@ -391,6 +401,7 @@ class ExtractorEvaluator(Evaluator):
                 "skipped_marked": getattr(self, "_skipped_marked", 0),
                 "dropped_no_response": getattr(self, "_dropped_missing_response", 0),
                 "dropped_no_gt_key": getattr(self, "_dropped_missing_gt", 0),
+                "dropped_no_question": getattr(self, "_dropped_missing_question", 0),
                 "gt_empty": getattr(self, "_gt_empty", 0),
             },
             # 🔎 Matching Quality — the two funnels
@@ -567,6 +578,7 @@ class ExtractorEvaluator(Evaluator):
         valid = []
         self._skipped_marked = 0
         self._dropped_missing_response = 0
+        self._dropped_missing_question = 0
         self._dropped_missing_gt = 0
 
         for item in data:
@@ -576,6 +588,9 @@ class ExtractorEvaluator(Evaluator):
             if not item.get("response"):
                 self._dropped_missing_response += 1
                 continue
+            if self._gets_question(item) and not str(item.get("question") or "").strip():
+                self._dropped_missing_question += 1
+                continue
             if not isinstance(item.get(self._gt_key), list):
                 self._dropped_missing_gt += 1
                 continue
@@ -583,7 +598,8 @@ class ExtractorEvaluator(Evaluator):
         self._gt_empty = sum(1 for item in valid if not item[self._gt_key])
 
         if not valid:
-            with_response = len(data) - self._skipped_marked - self._dropped_missing_response
+            with_response = (len(data) - self._skipped_marked - self._dropped_missing_response
+                             - self._dropped_missing_question)
             if with_response and self._dropped_missing_gt == with_response:
                 raise InvalidInputError(
                     f"No ground truth found: none of the {with_response} "
@@ -596,6 +612,7 @@ class ExtractorEvaluator(Evaluator):
                 f"No evaluable items. All {len(data)} items dropped "
                 f"(skipped_marked={self._skipped_marked}, "
                 f"missing_response={self._dropped_missing_response}, "
+                f"missing_question={self._dropped_missing_question}, "
                 f"missing_gt={self._dropped_missing_gt})."
             )
 
@@ -1053,10 +1070,13 @@ class ExtractorEvaluator(Evaluator):
             return [_spo(t) for t in triplets]
 
         def entry(item: dict, i: int, bucket: str, **extra) -> dict:
+            # Sparse: only an item extracted with its question says so.
+            given = {"question_given": True} if self._gets_question(item) else {}
             return {
                 "id": item.get("id", f"{bucket}-{i}"),
                 "question": item.get("question", ""),
                 "response": item.get("response", ""),
+                **given,
                 "bucket": bucket,
                 **extra,
             }
@@ -1149,14 +1169,20 @@ class ExtractorEvaluator(Evaluator):
         if no_gt > 0:
             logger.info("     ├─ dropped:  %d  (missing GT key '%s')",
                         no_gt, self._gt_key)
+        no_question = getattr(self, "_dropped_missing_question", 0)
+        if no_question > 0:
+            logger.info("     ├─ dropped:  %d  (marked '%s', no 'question')",
+                        no_question, self._question_if)
         gt_empty = getattr(self, "_gt_empty", 0)
         logger.info("     └─ valid:    %d items  (%d with GT claims, %d %s)",
                     valid, valid - gt_empty, gt_empty,
                     plural(gt_empty, "abstention"))
         logger.info("")
 
-    def _log_eval_config(self) -> None:
-        """Print ⚙️  Config section — evaluator-specific."""
+    def _log_eval_config(self, items: list[dict] | None = None) -> None:
+        """Print ⚙️  Config section — evaluator-specific. The Question line
+        shows only when *items* get the question prompt (the service runs
+        compact and prints no Config of its own)."""
         logger.info(" ⚙️  Config")
 
         ext_location = self._extractor_model
@@ -1178,6 +1204,11 @@ class ExtractorEvaluator(Evaluator):
             logger.info("    Atomicity:   skipped (%s)", self._atomizer_skip_reason)
 
         logger.info("    Prompts:     %s", prompts.describe_prompts(self._templates))
+        items = items or []
+        marked = sum(self._gets_question(item) for item in items)
+        if marked:
+            logger.info("    Question:    %d of %d items get the question prompt ('%s')",
+                        marked, len(items), self._question_if)
         logger.info("")
 
     def _log_eval_results(self, result: ExtractorEvalResult) -> None:

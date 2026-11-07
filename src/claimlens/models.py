@@ -16,6 +16,7 @@ class ExtractionPayload:
 
     text: str
     require_ground_truth: bool = False
+    question: str | None = None   # set only for an item marked by --question-if: the question prompt is used
 
 
 # ── Checking ─────────────────────────────────────────────────────────────────

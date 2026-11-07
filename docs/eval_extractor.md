@@ -53,6 +53,12 @@ never be reported as the extractor's mistake.
   nothing to extract: the response abstained, and that is what makes a
   misread abstention detectable.
 - **Drops** items without a `response`; there is nothing to extract from.
+- **Drops** items marked by `--question-if` (`"needs_question": true` by
+  default) that have no `question`: they cannot get the question prompt.
+  Counted as `dropped_no_question` in `counts.data` and on its own 📂 Data
+  line. Every item extracted with its question carries a sparse
+  `"question_given": true` in the record's items, and ⚙️ Config prints how
+  many there are.
 - **Canonicalizes** key aliases (`context` → `reference`) and GT triplets
   (`{"triplet": [s, p, o]}` → `{"subject", "predicate", "object"}`).
 - **Fails fast** (`InvalidInputError`) if no item survives, or if *no* item
@@ -229,6 +235,7 @@ claimlens eval extractor <input_file> [options]
 | **Word Budget** | `--max-words` | `None` | Word budget per matching call. |
 | **Runs** | `--runs` | `1` | Repeat the whole eval N times and report variance (N × LLM cost). |
 | **Skip Marked** | `--skip-marked` | `None` | Leave out every item that carries this key, e.g. `cut`: not extracted, not matched, counted as `skipped_marked` in `counts.data`. The item stays in the input file. |
+| **Question If** | `--question-if` | `needs_question` | An item whose value under this key is `true` is extracted with its question, through `extractor_prompt_question`; every other item from its text alone. A marked item without a `question` is dropped (`dropped_no_question`). `""` turns it off. |
 | **Concurrency** | `--concurrency` | `10` | Max simultaneous LLM requests per client. |
 | **Debug Mode** | `--debug` | `False` | Timestamps + module names in logs. |
 

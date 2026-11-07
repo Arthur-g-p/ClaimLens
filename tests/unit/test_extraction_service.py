@@ -7,7 +7,12 @@ these tests never touch the LLM.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
+
+from claimlens import prompts
+from claimlens.models import ExtractionPayload, RetryRoundConfig
+from claimlens.stats import PhaseStats
+from claimlens.workers.extractor import Extractor
 
 from claimlens.services.extraction import ExtractionService
 from claimlens.workers.extractor import Triplet
@@ -389,3 +394,130 @@ class TestWorkerErrorCauses:
         )
         assert results == [[]]
         assert extractor.last_stats.error_causes == {0: "parse_failure"}
+
+
+# ── --question-if: the question prompt for marked items ─────────────────────
+
+QKEY = "needs_question"
+
+
+def _q_service(question_if=QKEY, verbosity="silent"):
+    with patch("claimlens.services.extraction.Extractor") as cls:
+        svc = ExtractionService(model=MODEL, question_if=question_if, verbosity=verbosity)
+    worker = cls.return_value
+    worker.extract_batch = AsyncMock(side_effect=lambda payloads, **kw: [[_trip("s", "p", "o")] for _ in payloads])
+    worker.last_stats = PhaseStats()
+    return svc, worker
+
+
+def _sent(worker):
+    return worker.extract_batch.call_args.args[0]
+
+
+class TestQuestionIf:
+
+    def test_off_by_default(self):
+        svc, worker = _q_service(question_if=None)
+        with patch("claimlens.services.extraction.Extractor"):
+            assert ExtractionService(model=MODEL).question_if is None
+        svc.run_sync([{"question": "Q?", "response": "No.", QKEY: True}])
+        assert _sent(worker) == [ExtractionPayload(text="No.")]
+
+    def test_only_true_marks_get_the_question(self):
+        svc, worker = _q_service()
+        svc.run_sync([
+            {"question": "Can goats eat ivy?", "response": "No.", QKEY: True},
+            {"question": "Can goats eat ivy?", "response": "No.", QKEY: False},
+            {"question": "Can goats eat ivy?", "response": "No.", QKEY: "true"},
+            {"question": "Can goats eat ivy?", "response": "No."},
+        ])
+        assert [p.question for p in _sent(worker)] == ["Can goats eat ivy?", None, None, None]
+
+    def test_unmarked_payload_identical_to_before(self):
+        svc, worker = _q_service()
+        svc.run_sync([{"question": "Q?", "response": "Cats purr."}])
+        assert _sent(worker) == [ExtractionPayload(text="Cats purr.")]
+
+    def test_marked_without_question_dropped_and_counted(self):
+        svc, worker = _q_service()
+        valid = svc._validate([
+            {"id": "a", "response": "Yes.", QKEY: True},
+            {"id": "b", "question": "  ", "response": "Yes.", QKEY: True},
+            {"id": "c", "question": "Q?", "response": "Yes.", QKEY: True},
+            {"id": "d", "response": "Cats purr."},
+        ])
+        assert [i["id"] for i in valid] == ["c", "d"]
+        assert svc._dropped_no_question == 2
+
+    def test_nothing_survives_raises(self):
+        svc, _ = _q_service()
+        with pytest.raises(InvalidInputError):
+            svc.run_sync([{"response": "Yes.", QKEY: True}])
+
+    def test_empty_key_turns_it_off(self):
+        svc, worker = _q_service(question_if="")
+        assert svc.question_if is None
+        svc.run_sync([{"response": "Yes.", QKEY: True}])     # not dropped: off
+        assert _sent(worker) == [ExtractionPayload(text="Yes.")]
+
+    def test_custom_key(self):
+        svc, worker = _q_service(question_if="bare")
+        svc.run_sync([{"question": "Q?", "response": "Yes.", "bare": True, QKEY: False}])
+        assert _sent(worker)[0].question == "Q?"
+
+    def test_validation_and_config_lines(self, caplog):
+        import logging
+        svc, _ = _q_service(verbosity="full")
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            svc.run_sync([{"question": "Q?", "response": "Yes.", QKEY: True},
+                          {"response": "Yes.", QKEY: True},
+                          {"question": "Q?", "response": "Cats purr."}])
+        assert "├─ dropped:  1  (marked 'needs_question', no 'question')" in caplog.text
+        assert "Question:    1 of 2 items get the question prompt ('needs_question')" in caplog.text
+
+    def test_no_config_line_without_marked_items(self, caplog):
+        import logging
+        svc, _ = _q_service(verbosity="full")
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            svc.run_sync([{"question": "Q?", "response": "Cats purr."}])
+        assert "Question:" not in caplog.text
+
+
+class TestWorkerQuestionPrompt:
+    """The Extractor fills extractor_prompt_question when the payload has a
+    question — first attempt, retry rounds, plain fallback — and the
+    text-only prompt otherwise, exactly as before."""
+
+    def _worker(self, templates=None):
+        with patch("claimlens.workers.extractor.LLMClient"):
+            return Extractor(api_key="k", model="m", templates=templates)
+
+    @staticmethod
+    def _user(messages):
+        return "".join(b["text"] for b in messages[-1]["content"])
+
+    def test_question_prompt_filled(self):
+        task = self._worker()._build_task(ExtractionPayload(text="No.", question="Can goats eat ivy?"))
+        p = prompts.PROMPTS["extractor_prompt_question"]
+        assert task["messages"] == prompts.prompt_messages(p, {"text": "No.", "question": "Can goats eat ivy?"})
+
+    def test_text_only_prompt_unchanged(self):
+        task = self._worker()._build_task(ExtractionPayload(text="Cats purr."))
+        assert task["messages"] == prompts.prompt_messages(prompts.PROMPTS["extractor_prompt"], {"text": "Cats purr."})
+        assert "Can goats" not in self._user(task["plain_messages"])
+
+    def test_retry_round_keeps_the_question(self):
+        task = self._worker()._build_task(ExtractionPayload(text="No.", question="Can goats eat ivy?"),
+                                          RetryRoundConfig(temperature=0.5, prompt="plain"))
+        assert "Can goats eat ivy?" in self._user(task["messages"])
+        assert '"triplets"' in self._user(task["messages"])      # the plain question prompt, schema filled
+
+    def test_plain_fallback_keeps_the_question(self):
+        task = self._worker()._build_task(ExtractionPayload(text="No.", question="Can goats eat ivy?"))
+        assert "Can goats eat ivy?" in self._user(task["plain_messages"])
+
+    def test_override_is_used(self):
+        t = {**prompts.PROMPTS, "extractor_prompt_question": {
+            "system": "S", "instructions": "I", "input": "{{question}}|{{text}}"}}
+        task = self._worker(t)._build_task(ExtractionPayload(text="No.", question="Q?"))
+        assert task["messages"][0]["content"] == "S" and self._user(task["messages"]) == "IQ?|No."

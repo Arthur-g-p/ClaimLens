@@ -146,6 +146,7 @@ def extract(
     model: str = typer.Option(None, "--extractor-model", "--model", "-m", help="Model name used as key prefix."),
     extractor_base_api: str = typer.Option(None, "--extractor-base-api", help="Optional base URL for the LLM API."),
     dedup: bool = typer.Option(True, "--dedup/--no-dedup", help="Remove exact (s,p,o) duplicate triplets from the output. On by default (loss-free cleanup)."),
+    question_if: str = typer.Option("needs_question", "--question-if", help="Extract an item with its question (the question prompt) when its value under this key is true; every other item from its text alone. \"\" turns it off."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark each prompt's fixed instructions as cacheable (cache_control). On by default."),
     prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
@@ -174,7 +175,7 @@ def extract(
     # Call service
     try:
         service = ExtractionService(model=model, base_url=extractor_base_api, dedup=dedup, concurrency=concurrency, prompt_cache=prompt_cache,
-                                    templates=_load_prompts(prompts))
+                                    templates=_load_prompts(prompts), question_if=question_if)
         result = service.run_sync(data)
     except ClaimLensError as exc:
         logger.error("")
@@ -774,6 +775,7 @@ def eval_extractor(
         None, "--skip-marked",
         help="Leave out items that carry this key (e.g. 'cut'): not extracted, not matched, counted as skipped.",
     ),
+    question_if: str = typer.Option("needs_question", "--question-if", help="Extract an item with its question (the question prompt) when its value under this key is true; every other item from its text alone. \"\" turns it off."),
     concurrency: int = typer.Option(10, "--concurrency", help="Max simultaneous LLM requests, per LLM client. Default: 10."),
     prompt_cache: bool = typer.Option(True, "--prompt-cache/--no-prompt-cache", help="Mark each prompt's fixed instructions as cacheable (cache_control). On by default."),
     prompts: Path = typer.Option(None, "--prompts", help="JSON file with the prompt keys to replace; every other key comes from the shipped prompt_map.json."),
@@ -817,6 +819,7 @@ def eval_extractor(
             atomizer_base_url=atomizer_base_api,
             runs=runs,
             skip_marked=skip_marked,
+            question_if=question_if,
         )
         record, findings = evaluator.run_sync(data)
         _args = _capture_args(ctx, "eval extractor")

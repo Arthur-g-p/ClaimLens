@@ -332,6 +332,19 @@ item placeholder in `instructions`, a placeholder nothing fills, or an `input`
 missing one the shipped prompt has stops the run before the first request. The report's `_args` names the file and `_meta.prompts_sha256`
 records a hash of the full template set in force (the Config block shows it
 too), so a record still says which prompts made it after the file changes.
+The keys: `extractor_prompt`, `extractor_prompt_question` (the extractor for a
+response that needs its question, see below), `checker_prompt`,
+`checker_prompt_joint`, `claim_match_prompt` (the extraction eval's matcher)
+and `atomizer_prompt`, each with a `_plain` fallback.
+
+**The question, for the responses that need it.** The extractor reads the
+response text alone. On `extract` and `eval extractor`, an item marked
+`"needs_question": true` is extracted with its question instead, through
+`extractor_prompt_question`: a bare answer ("About 11 months.") or a polar
+"Yes." then becomes a claim. `--question-if KEY` names the mark (default
+`needs_question`, `""` turns it off); every unmarked item is extracted exactly
+as before. See [docs/extractor.md](docs/extractor.md#what-gets-sent-to-the-llm).
+
 From Python: `prompts="my_prompts.json"` on the verbs; the pipeline classes
 take the resolved map,
 `templates=claimlens.prompts.resolve_prompts("my_prompts.json")`.
