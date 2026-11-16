@@ -55,12 +55,13 @@ Conventions:
 | Matrix directions | `{namespace}_verdicts: {doc_id: verdict}` + `{namespace}_errors: {doc_id: cause}` (only non-null causes) + `{namespace}_retries: {doc_id: n}` (only retried cells) |
 
 A first-pass verdict and a retried one are not measured under the same
-condition. The first pass runs the standard prompt at temperature 0.0; a
-parse failure is re-sent in rounds:
+condition. The first pass runs the standard prompt at temperature 0.0 (the
+checker and the atomizer; the extractor's first pass runs at 0.5, so a
+repeated extraction varies); a parse failure is re-sent in rounds:
 
 | `retry` | Prompt | Temperature |
 | --- | --- | --- |
-| absent | standard | 0.0 |
+| absent | standard | 0.0 (extractor: 0.5) |
 | `1` | standard | 0.3 |
 | `2` | plain | 0.5 |
 

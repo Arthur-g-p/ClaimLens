@@ -121,11 +121,11 @@ class Extractor:
         """Build a generate_batch task dict for one item.
 
         Uses the round config to determine prompt and temperature.
-        None means first pass (standard prompt, temp 0.0).
+        None means first pass (standard prompt, temp 0.5).
         """
         if round_config is None:
             messages = self._build_messages(payload.text, question=payload.question)
-            temperature = 0.0
+            temperature = 0.5   # for now (claimlens-gt): a repeated extraction varies; was 0.0
         else:
             messages = self._build_messages(payload.text, round_config.prompt, payload.question)
             temperature = round_config.temperature

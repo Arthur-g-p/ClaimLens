@@ -61,7 +61,7 @@ CLI (controllers)  →  Pipelines / Services (orchestration)  →  Workers (exec
 ## Service vs Pipeline vs Worker vs Direction — the definitions
 
 **Worker**: a dumb async execution unit. Takes payloads, calls the LLM,
-parses, retries parse failures in configurable rounds (higher temperature,
+parses, retries parse failures in configurable rounds (another temperature,
 then a "vanilla" prompt), classifies per-item failures into causes
 (`context_too_long` / `content_policy` / `parse_failure`), exposes
 `last_stats`. No validation, no orchestration. Two exist: `Extractor`,

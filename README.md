@@ -29,10 +29,11 @@ disagree with.
   `--runs N` to `ragcheck`, `faithcheck`, `compare`, `eval extractor` or
   `eval checker` and get `mean +/- std [min, max]` per metric across N
   full repetitions, plus each run's complete report. A single-run score
-  overstates your certainty. Note: first passes run at temperature 0, so
-  the spread mostly reflects provider-side nondeterminism (plus the few
-  claims that needed a retry), not sampling. Read it as a lower bound on
-  run-to-run variation.
+  overstates your certainty. Note: the extractor's first pass runs at
+  temperature 0.5, so a repeated extraction varies and the spread includes
+  that sampling; the checker's and atomizer's first passes run at
+  temperature 0, so their share of the spread is provider-side
+  nondeterminism (plus the few claims that needed a retry).
 - **The evaluator is itself evaluated**: `eval extractor` and
   `eval checker` measure the measurement tool against ground-truth
   labels, so you know how much to trust the numbers before you compare

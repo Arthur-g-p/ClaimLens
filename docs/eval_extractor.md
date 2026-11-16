@@ -17,6 +17,22 @@ counterpart in the other.
 > same model before trusting `eval extractor` output, and read the
 > `checker_failures` block in every report.
 
+## The matcher at a glance
+
+The "checker" of this eval is a matcher: it compares claims with claims. Read
+its prompt before reading any number.
+
+| | |
+| --- | --- |
+| prompt | `claim_match_prompt` in the prompt map, `src/claimlens/prompt_map.json`. Its twin `claim_match_prompt_plain` is sent only to a model that accepts no `response_format` |
+| both directions | the **same** prompt for pass 1 and pass 2 |
+| roles in the prompt | none: the prompt speaks of "one triplet (the Claim)" and "a list of other triplets (the Reference)", since the same words serve both passes |
+| one call | up to `--joint-num` claims (default 10) of one item, against the whole claim list of the other side. The bundle shrinks only when a call would pass the word budget (`DEFAULT_MAX_WORDS` 6,000 × 0.75) |
+| what the model reads | every triplet flattened to `subject predicate object`; the claims numbered `[1]`, `[2]`, …; the other side's list as `(R1)`, `(R2)`, … |
+| never sees | the response and the question |
+| answer per claim | an explanation, then `Entailment`, `Neutral` or `Contradiction` |
+| verdicts per item | one per GT claim (pass 1) plus one per predicted claim (pass 2) |
+
 ---
 
 ## Pipeline Overview
@@ -31,7 +47,9 @@ Input (list[dict])
   ├─ 2c duplicates →  Orthogonal axis, read-only
   ├─ _classify()   →  Five buckets: to_compare, abstention_recognized,
   │                   answer_missed, abstention_misread, extraction_error
-  ├─ Match (LLM)   →  2-pass entailment check over the `to_compare` items
+  ├─ Match (LLM)   →  2-pass entailment check over the `to_compare` items:
+  │                   _match_all_llm() builds synthetic items per pass
+  │                   (_build_pass_items) and runs `CheckingService` twice
   └─ Metrics       →  Precision / Recall / F1 + orthogonal axes + tooling rates
 ```
 
@@ -135,8 +153,30 @@ For `to_compare` items, two independent passes through `CheckingService` in
 2. **Pass 2 — Pred → GT (precision).** Roles reversed. Entailment = this
    prediction is supported by ground truth.
 
+| pass | each claim of | judged against | question | counts for |
+| --- | --- | --- | --- | --- |
+| 1 | the GT | all predictions of the item | does the prediction list make this GT claim true? | recall |
+| 2 | the predictions | all GT claims of the item | does the GT list make this prediction true? | precision |
+
+Each pass is its own `CheckingService` run. `_build_pass_items` turns every
+compared item into a synthetic item for it: the claims side goes under a
+placeholder extraction key (`_exteval_response_kg`), the other side becomes one
+reference text of `(R1)`, `(R2)`, … lines. In pass 2 the two sides swap. This is
+reshaping only: nothing is extracted again, and no call is spent on it.
+
 Two passes, two independent counts — following RAGChecker, there is **no shared
-TP and no `min()`**.
+TP and no `min()`**. Each pass counts its own hits, and the two counts need not
+agree. Example: the GT holds three claims A, B and C; the extractor wrote one
+claim "A, B and C". Pass 1 finds each of A, B and C covered (recall 3 / 3);
+pass 2 finds the one prediction supported (precision 1 / 1). A shared TP would
+count matched pairs once for both ratios (here one pair, so recall 1 / 3); a
+`min()` would take the smaller of the two hit counts. Neither is done.
+
+**Combining reference triplets.** The prompt's rule 2 lets several reference
+triplets together entail a claim ("Items the reference states separately entail
+a claim that joins them with 'and'"). Its closing instruction ("If the Claim is
+supported by ANY triplet in the Reference") reads as one triplet. In the example
+above, pass 1 needs one triplet per claim, pass 2 needs all three together.
 
 ### Why the matcher never sees the response
 
@@ -153,13 +193,18 @@ best") now judged a miss.
 
 ### Three verdict outcomes, not two
 
-Each claim comes back as exactly one of:
+The matcher can return four things (three verdicts, or none at all), and they
+have three effects. Each claim comes back as exactly one of:
 
 | verdict | meaning | effect on metrics |
 | --- | --- | --- |
 | `Entailment` | counterpart found | numerator **and** denominator |
 | `Contradiction` / `Neutral` | judged, no counterpart | denominator only (a real miss) |
 | `None` | the checker never returned a verdict (parse failure after all retries) | **neither** — the claim leaves the ratio entirely |
+
+`Contradiction` and `Neutral` share a row because they have the same effect:
+both mean no counterpart. What they say differs: `Contradiction` means the other
+side states the opposite, `Neutral` that it does not state the claim.
 
 A claim nobody judged is not evidence about the extractor. Unjudged claims are
 excluded from both sides of the fraction, counted in `checker_failures`, and
@@ -230,9 +275,9 @@ claimlens eval extractor <input_file> [options]
 | **GT Key** | `--gt-key` | `claude2_response_kg` | Item key holding the ground-truth triplets. |
 | **Atomizer Model** | `--atomizer-model` | `None` | Enables the atomicity axis. Needs `ATOMIZER_API_KEY`; silently skipped if unset. |
 | **Atomizer API Base** | `--atomizer-base-api` | `None` | Base URL for the atomizer. |
-| **Output File** | `--output`, `-o` | `results/{input_stem}_extractor_eval[_{runs}].json` | Summary JSON. The `_{runs}` suffix appears only for `--runs > 1`. A `*_disagreements.json` is written alongside. |
+| **Output File** | `--output`, `-o` | `results/{input_stem}_extractor_eval[_{runs}].json` | Summary JSON. The `_{runs}` suffix appears only for `--runs > 1`. A `*_findings.json` (the review queue) is written alongside. |
 | **Joint Bundle Size** | `--joint-num` | `10` | Max claims bundled per joint matching call. |
-| **Word Budget** | `--max-words` | `None` | Word budget per matching call. |
+| **Word Budget** | `--max-words` | `None` | Word budget per matching call. Unset, joint mode uses `DEFAULT_MAX_WORDS` (6,000), of which 75 % goes to the reference and the claims; a call over it gets fewer claims. |
 | **Runs** | `--runs` | `1` | Repeat the whole eval N times and report variance (N × LLM cost). |
 | **Skip Marked** | `--skip-marked` | `None` | Leave out every item that carries this key, e.g. `cut`: not extracted, not matched, counted as `skipped_marked` in `counts.data`. The item stays in the input file. |
 | **Question If** | `--question-if` | `needs_question` | An item whose value under this key is `true` is extracted with its question, through `extractor_prompt_question`; every other item from its text alone. A marked item without a `question` is dropped (`dropped_no_question`). `""` turns it off. |
@@ -261,10 +306,13 @@ claimlens eval extractor <input_file> [options]
 ```bash
 claimlens eval extractor eval_data/msmarco/msmarco_gpt4_5.json \
   --extractor-model gemini-3.1 \
-  --checker-model gemini-3.1 \
+  --checker-model claude-haiku-5.5 \
   --extractor-base-api http://localhost:4000/v1 \
   --checker-base-api http://localhost:4000/v1
 ```
+
+Two different models: a model that matches its own extraction is no independent
+check.
 
 Reads GT from `claude2_response_kg`, extracts live into
 `gemini-3.1_response_kg`, runs the 2-pass match, then writes

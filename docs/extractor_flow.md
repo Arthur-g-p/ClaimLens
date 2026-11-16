@@ -38,4 +38,4 @@ flowchart LR
    - **FATAL errors** (like connection failures, invalid API keys, or credit exhaustion) trigger cache persistence and terminate the entire run.
    - **SKIP errors** (like context-window exceeded or safety policy violations) result in the specific item returning empty triplets, while other items continue.
    - **RETRY errors** (like transient rate limits or server timeouts) are handled inside `LLMClient` with exponential backoff and retried.
-5. **Worker Retries**: If the raw LLM response fails to parse against the JSON schema, the worker triggers retry rounds (up to $X$ configured attempts, e.g. using a higher temperature or simplified vanilla prompt) before giving up and returning empty triplets.
+5. **Worker Retries**: If the raw LLM response fails to parse against the JSON schema, the worker triggers retry rounds (up to $X$ configured attempts, e.g. using another temperature or the simplified vanilla prompt) before giving up and returning empty triplets.
