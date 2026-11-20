@@ -40,7 +40,7 @@ from claimlens.utils import (
 from claimlens.eval.base import Evaluator
 from claimlens.pipelines.directions import _flat_cell, _spo
 from claimlens.services.base import BaseService
-from claimlens.services.checking import CheckingService, mode_label
+from claimlens.services.checking import CheckingService
 from claimlens.services.extraction import ExtractionService
 from claimlens.services.atomization import AtomizationService
 
@@ -51,6 +51,19 @@ logger = settings.get_logger(__name__)
 
 # Internal model name for the checking service's kg_key.
 _INTERNAL_EXT_MODEL = "_exteval"
+
+# How one matcher call is cut (docs/eval_extractor.md, "The three modes"):
+#   joint        — up to joint_num claims against one reference claim
+#   strict       — one claim against one reference claim
+#   many-to-many — up to joint_num claims against the whole list of reference claims
+# joint and strict ask the same pairs, one-to-one; only many-to-many lets the
+# matcher see several reference claims at once.
+MATCH_MODES = ("joint", "strict", "many-to-many")
+DEFAULT_MATCH_MODE = "joint"
+_PAIR_MODES = ("joint", "strict")
+
+_ENTAILMENT = "Entailment"
+_CONTRADICTION = "Contradiction"
 
 
 # ── Item classification ─────────────────────────────────────────────────────
@@ -114,6 +127,10 @@ class ExtractorEvaluator(Evaluator):
     Matching mode:
         - LLM: 2-pass batched checker with semantic equivalence prompt.
           Pass 1: GT→Pred (recall). Pass 2: Pred→GT (precision).
+        - match_mode cuts each call: ``joint`` (claims against one reference
+          claim), ``strict`` (one claim against one reference claim),
+          ``many-to-many`` (claims against the whole reference list). In joint
+          and strict every pair gets its own verdict, folded to one per claim.
 
     Returns (record, findings) — CLI writes two files verbatim.
     """
@@ -163,6 +180,8 @@ class ExtractorEvaluator(Evaluator):
         templates: prompts.PromptMap | None = None,
         joint_num: int = settings.DEFAULT_JOINT_NUM,
         max_words: int | None = None,
+        # How one matcher call is cut: "joint" | "strict" | "many-to-many" (MATCH_MODES)
+        match_mode: str = DEFAULT_MATCH_MODE,
         # Atomicity axis (optional, orthogonal to coverage)
         atomizer_model: str | None = None,
         atomizer_base_url: str | None = None,
@@ -175,6 +194,10 @@ class ExtractorEvaluator(Evaluator):
     ):
         if not checker_model:
             raise ValueError("checker_model is required for evaluation matching.")
+        if match_mode not in MATCH_MODES:
+            raise InvalidInputError(
+                f"match_mode must be one of {', '.join(MATCH_MODES)}, got '{match_mode}'."
+            )
 
         self._extractor_model = extractor_model
         self._gt_key = gt_key
@@ -223,6 +246,7 @@ class ExtractorEvaluator(Evaluator):
         self._prompt_cache = prompt_cache
         self._joint_num = joint_num
         self._max_words = max_words
+        self._match_mode = match_mode
 
         # Atomicity axis — OPTIONAL. Built only if an atomizer model is given AND
         # the key is configured (AtomizationService.__init__ would otherwise raise
@@ -325,6 +349,26 @@ class ExtractorEvaluator(Evaluator):
         # paths and dumps JSON — it never composes content.
         return self._run_documents(result, buckets, item_results, len(data))
 
+    @property
+    def _bundle_size(self) -> int:
+        """Claims per matcher call as the run uses it: one in strict,
+        joint_num in joint and many-to-many."""
+        return 1 if self._match_mode == "strict" else self._joint_num
+
+    def _match_mode_line(self) -> str:
+        """The Config "Match mode:" string: what one matcher call holds, and
+        the word budget where a bundle can shrink (joint, many-to-many), resolved as
+        the service resolves it."""
+        if self._match_mode == "strict":
+            return "strict · one claim against one reference claim per call"
+        words = (self._max_words if self._max_words is not None
+                 else settings.DEFAULT_MAX_WORDS)
+        if self._match_mode == "joint":
+            return (f"joint · up to {self._joint_num} claims against one "
+                    f"reference claim per call · {words} max words")
+        return (f"many-to-many · up to {self._joint_num} claims against the whole "
+                f"list of reference claims per call · {words} max words")
+
     def _gets_question(self, item: dict) -> bool:
         """Extracted with its question? The same rule as ExtractionService.is_marked:
         only the value true counts."""
@@ -365,6 +409,8 @@ class ExtractorEvaluator(Evaluator):
             dropped_items=total_items - evaluated,
             pred_key=self._pred_key,
             matching="llm-2-pass",
+            match_mode=self._match_mode,
+            joint_num=self._bundle_size,
             request_strategies=GLOBAL_STATS.strategies(),
             prompt_cache_marker=GLOBAL_STATS.cache_markers(),
             prompts_sha256=prompts.prompts_sha256(self._templates),
@@ -838,6 +884,14 @@ class ExtractorEvaluator(Evaluator):
         Pass 2 (Pred → GT): Pred triplets as claims, GT triplets as reference.
             Non-Entailment = hallucinated/wrong prediction (contributes to FP).
 
+        The match mode decides what one call holds (MATCH_MODES). In
+        ``many-to-many`` a synthetic item carries the whole reference list and
+        every claim gets one verdict. In ``joint`` and ``strict`` a synthetic item
+        carries one reference claim, so every (claim, reference claim) pair
+        gets its own verdict; the pairs are folded to one cell per claim
+        (``_fold_pairs``) before counting. The service bundles up to
+        joint_num claims per call in ``joint``, one in ``strict``.
+
         Uses claim_match_prompt. The response text is withheld on
         purpose: given it, the matcher matched claims that had no counterpart
         on the other side (docs/eval_extractor.md, "Why the matcher never
@@ -845,6 +899,10 @@ class ExtractorEvaluator(Evaluator):
         """
         # Build a CheckingService with the eval prompt. Each pass is one
         # phase with its own labeled section rule, like a pipeline direction.
+        # joint=True in every mode: joint=False would switch the worker to
+        # checker_prompt, another prompt. strict bundles one claim per call.
+        # In joint/strict a verdict of the service belongs to a pair.
+        count_unit = "pairs" if self._match_mode in _PAIR_MODES else "claims"
         service = CheckingService(
             model=self._checker_model,
             extractor_model=_INTERNAL_EXT_MODEL,
@@ -853,11 +911,12 @@ class ExtractorEvaluator(Evaluator):
             prompt_cache=self._prompt_cache,
             templates=self._templates,
             joint=True,
-            joint_num=self._joint_num,
+            joint_num=self._bundle_size,
             max_words=self._max_words,
             verbosity="silent" if self._runs > 1 else "compact",
             section_label="Matching pass 1: GT → Pred (recall)",
             joint_prompt_key="claim_match_prompt",
+            count_unit=count_unit,
         )
 
         # ── Pass 1: GT → Pred (recall / FN detection) ──────────
@@ -881,40 +940,44 @@ class ExtractorEvaluator(Evaluator):
             prompt_cache=self._prompt_cache,
             templates=self._templates,
             joint=True,
-            joint_num=self._joint_num,
+            joint_num=self._bundle_size,
             max_words=self._max_words,
             verbosity="silent" if self._runs > 1 else "compact",
             section_label="Matching pass 2: Pred → GT (precision)",
             joint_prompt_key="claim_match_prompt",
+            count_unit=count_unit,
         )
 
         await service2.run(pass2_items)
 
         # ── Collect results ────────────────────────────────────
-        service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
         verdict_key = f"{self._checker_model}_checker_verdict"
         explanation_key = f"{self._checker_model}_checker_explanation"
-        namespace = f"{self._checker_model}_checker"
+
+        cells1 = self._pass_cells(pass1_items, valid_items, self._gt_key, "prediction")
+        cells2 = self._pass_cells(pass2_items, valid_items, self._pred_key,
+                                  "ground-truth claim")
 
         results = []
         for i, item in enumerate(valid_items):
             gt_triplets = item[self._gt_key]
             pred_triplets = item[self._pred_key]
 
-            # Pass 1 verdicts: one per GT triplet
-            pass1_triplets = pass1_items[i][service_kg_key]
-            # Pass 2 verdicts: one per pred triplet
-            pass2_triplets = pass2_items[i][service_kg_key]
+            # The counting reads a verdict and an explanation per claim:
+            # the service's own in many-to-many, the folded one in joint/strict.
+            def checked(cells: list[dict]) -> list[dict]:
+                return [{verdict_key: c["verdict"], explanation_key: c["explanation"]}
+                        for c in cells]
 
             # Pass 1 (recall): GT triplets the predictions failed to cover → FN
             tp_from_recall, fn_list, unjudged_gt = self._count_pass(
-                pass1_triplets, gt_triplets,
+                checked(cells1[i]), gt_triplets,
                 verdict_key, explanation_key, "gt_triplet",
             )
 
             # Pass 2 (precision): predictions the GT does not support → FP
             tp_from_precision, fp_list, unjudged_pred = self._count_pass(
-                pass2_triplets, pred_triplets,
+                checked(cells2[i]), pred_triplets,
                 verdict_key, explanation_key, "pred_triplet",
             )
 
@@ -931,11 +994,97 @@ class ExtractorEvaluator(Evaluator):
                 false_negatives=fn_list,
                 unjudged_gt=unjudged_gt,
                 unjudged_pred=unjudged_pred,
-                pred2gt=[_flat_cell(t, namespace) for t in pass1_triplets],
-                gt2pred=[_flat_cell(t, namespace) for t in pass2_triplets],
+                pred2gt=cells1[i],
+                gt2pred=cells2[i],
             ))
 
         return results
+
+    def _pass_cells(
+        self,
+        pass_items: list[dict],
+        valid_items: list[dict],
+        claims_key: str,
+        other_side: str,
+    ) -> list[list[dict]]:
+        """One verdict cell per claim, per item, parallel to the claims.
+
+        many-to-many: the service's verdict as it is (``_flat_cell``), one synthetic
+        item per answer. joint/strict: one synthetic item per (answer,
+        reference claim); each claim's pairs are gathered in reference order
+        and folded (``_fold_pairs``). *other_side* names the reference claims
+        in a miss's explanation ("prediction", "ground-truth claim").
+        """
+        service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
+        namespace = f"{self._checker_model}_checker"
+        if self._match_mode not in _PAIR_MODES:
+            return [[_flat_cell(t, namespace) for t in synth[service_kg_key]]
+                    for synth in pass_items]
+
+        pairs: list[list[list[dict]]] = [
+            [[] for _ in item[claims_key]] for item in valid_items]
+        for synth in pass_items:
+            i, k = synth["_item_index"], synth["_ref_index"]
+            for j, t in enumerate(synth[service_kg_key]):
+                pairs[i][j].append({"index": k, **_flat_cell(t, namespace)})
+        return [[self._fold_pairs(claim_pairs, other_side) for claim_pairs in item_pairs]
+                for item_pairs in pairs]
+
+    @staticmethod
+    def _fold_pairs(pairs: list[dict], other_side: str = "claim of the other side") -> dict:
+        """Fold one claim's pair verdicts to the claim's verdict.
+
+        One-to-one: the claim is found when one single reference claim makes
+        it true. The fold is ragcheck's over a matrix row (``_row_entailed``),
+        with Contradiction kept apart from Neutral:
+
+            any pair Entailment                      → Entailment (no-verdict pairs do not matter)
+            no Entailment, a pair without a verdict  → None: unjudged, never a miss
+            no Entailment, all judged, a Contradiction → Contradiction
+            no Entailment, all judged, none          → Neutral
+
+        The cell keeps the flat shape {verdict, explanation, error?, retry?}
+        that the counting and the findings read, and adds ``matched_by`` (the
+        indexes of the reference claims that made it true) and ``pairs`` (one
+        cell per reference claim, ``index`` = its position in the other
+        side's list, 0-based; the matcher saw it as R{index + 1}).
+
+        ``explanation`` is always a string: the deciding pair's for an
+        Entailment, one sentence for a miss or a missing verdict; the pairs
+        carry the detail. ``retry`` is the deciding pair's round, so only an
+        Entailment can carry it; a miss is decided by every pair, and each
+        pair keeps its own (as faithcheck's ungrounded findings do).
+        """
+        verdicts = [p["verdict"] for p in pairs]
+        matched_by = [p["index"] for p in pairs if p["verdict"] == _ENTAILMENT]
+        if matched_by:
+            decider = next(p for p in pairs if p["verdict"] == _ENTAILMENT)
+            cell = {"verdict": _ENTAILMENT,
+                    "explanation": decider.get("explanation")
+                    or f"R{decider['index'] + 1} makes the claim true."}
+            if decider.get("retry"):
+                cell["retry"] = decider["retry"]
+        elif None in verdicts:
+            failed = [p for p in pairs if p["verdict"] is None]
+            if len(failed) == len(pairs):
+                why = f"No verdict: no pair of the {len(pairs)} returned one."
+            else:
+                why = (f"No verdict: {len(failed)} of {len(pairs)} pairs returned "
+                       f"none, and no other pair makes the claim true.")
+            cell = {"verdict": None, "explanation": why,
+                    "error": failed[0].get("error") or "checker_failure"}
+        else:
+            contradictions = verdicts.count(_CONTRADICTION)
+            neutral = len(verdicts) - contradictions
+            tally = ", ".join(part for part in (
+                f"{neutral} Neutral" if neutral else "",
+                f"{contradictions} Contradiction" if contradictions else "") if part)
+            cell = {"verdict": _CONTRADICTION if contradictions else "Neutral",
+                    "explanation": (f"No single {other_side} makes the claim "
+                                    f"true ({tally}).")}
+        cell["matched_by"] = matched_by
+        cell["pairs"] = pairs
+        return cell
 
     @staticmethod
     def _count_pass(
@@ -991,46 +1140,41 @@ class ExtractorEvaluator(Evaluator):
     ) -> list[dict]:
         """Build synthetic items for a checker pass.
 
-        Triplets from claims_key become the claims to check.
-        Triplets from ref_key are formatted as the reference text.
+        Triplets from claims_key become the claims to check, triplets from
+        ref_key the reference text, each line labelled with its real number:
+        the third reference claim is ``(R3)`` in every mode, so an
+        explanation that names it can be read against the record.
+
+        many-to-many: one item per answer, the whole reference list as its reference.
+        joint/strict: one item per (answer, reference claim), that one line
+        as its reference, over fresh copies of the claims (the same verdict
+        key would collide across reference claims otherwise, as in
+        ragcheck's matrix directions). ``_item_index`` / ``_ref_index`` say
+        which pair an item is; the service ignores them.
         """
         service_kg_key = f"{_INTERNAL_EXT_MODEL}_response_kg"
-        verdict_key = f"{self._checker_model}_checker_verdict"
-        explanation_key = f"{self._checker_model}_checker_explanation"
 
-        pass_items = []
-        for item in valid_items:
-            claim_triplets = item[claims_key]
-            ref_triplets = item[ref_key]
+        def claims(item: dict) -> list[dict]:
+            # Fresh s/p/o dicts: no verdict of an earlier run rides along.
+            return [{"subject": t["subject"], "predicate": t["predicate"],
+                     "object": t["object"]} for t in item[claims_key]]
 
+        def ref_line(k: int, t: dict) -> str:
             # R prefix, not [n]: claims carry [n], and a bare number on both
             # sides reads as a cross-reference the model then tries to honour.
-            ref_text = "\n".join(
-                f"(R{i+1}) {self._triplet_to_str(t)}"
-                for i, t in enumerate(ref_triplets)
-            )
+            return f"(R{k+1}) {self._triplet_to_str(t)}"
 
-            # Build the synthetic item the service expects
-            synth = {
-                # Reference = formatted triplets from the "other" set
-                "reference": [ref_text],
-                # Claims = triplets to check, under the service's kg_key
-                service_kg_key: [
-                    {
-                        "subject": t["subject"],
-                        "predicate": t["predicate"],
-                        "object": t["object"],
-                    }
-                    for t in claim_triplets
-                ],
-            }
-
-            # Strip any existing verdicts — force fresh compute
-            for triplet in synth[service_kg_key]:
-                triplet.pop(verdict_key, None)
-                triplet.pop(explanation_key, None)
-
-            pass_items.append(synth)
+        pass_items = []
+        for i, item in enumerate(valid_items):
+            ref_triplets = item[ref_key]
+            if self._match_mode in _PAIR_MODES:
+                for k, t in enumerate(ref_triplets):
+                    pass_items.append({"reference": [ref_line(k, t)],
+                                       service_kg_key: claims(item),
+                                       "_item_index": i, "_ref_index": k})
+                continue
+            ref_text = "\n".join(ref_line(k, t) for k, t in enumerate(ref_triplets))
+            pass_items.append({"reference": [ref_text], service_kg_key: claims(item)})
 
         return pass_items
 
@@ -1117,7 +1261,19 @@ class ExtractorEvaluator(Evaluator):
         A matching entry carries what it is judged against, as the checker
         eval's carry their chunks: the response and both claim lists. Claims
         stay s/p/o, unlike ragcheck's text: this queue is reviewed to repair
-        the ground truth, and a missing claim goes in as the triplet it names."""
+        the ground truth, and a missing claim goes in as the triplet it names.
+
+        In joint and strict a cell holds its pairs; the entry then shows them
+        (``pairs``): each reference claim with its verdict and explanation,
+        so the reviewer sees why no single claim matched."""
+        def pairs_of(cell: dict, references: list[dict]) -> dict:
+            if "pairs" not in cell:
+                return {}
+            return {"pairs": [{"index": p["index"],
+                               "reference_claim": references[p["index"]],
+                               **{k: v for k, v in p.items() if k != "index"}}
+                              for p in cell["pairs"]]}
+
         def classify(item: dict):
             head = {"id": item["id"], "question": item["question"]}
             bucket = item["bucket"]
@@ -1125,18 +1281,20 @@ class ExtractorEvaluator(Evaluator):
                 against = {"response": item["response"],
                            "gt_claims": item["gt_claims"],
                            "pred_claims": item["pred_claims"]}
-                for side, claims, cells, miss in (
-                        ("gt", "gt_claims", "pred2gt", "missed"),
-                        ("pred", "pred_claims", "gt2pred", "unsupported")):
+                for side, claims, cells, miss, references in (
+                        ("gt", "gt_claims", "pred2gt", "missed", "pred_claims"),
+                        ("pred", "pred_claims", "gt2pred", "unsupported", "gt_claims")):
                     for claim, cell in zip(item[claims], item[cells]):
                         if cell["verdict"] is None:
                             yield "unjudged", {**head, "claim": claim, "side": side,
                                                "cause": cell.get("error", "checker_failure"),
+                                               **pairs_of(cell, item[references]),
                                                **against}
                         elif cell["verdict"] != "Entailment":
                             yield miss, {**head, "claim": claim,
                                          "verdict": cell["verdict"],
                                          "explanation": cell["explanation"], **retry_of(cell),
+                                         **pairs_of(cell, item[references]),
                                          **against}
             elif bucket == "answer_missed":
                 yield "answer_missed", {**head, "response": item["response"],
@@ -1195,8 +1353,7 @@ class ExtractorEvaluator(Evaluator):
         if self._checker_base_url:
             location += f" @ {self._checker_base_url}"
         logger.info("    Matching:    LLM 2-pass (%s)", location)
-        logger.info("    Mode:        %s",
-                    mode_label(True, self._joint_num, self._max_words))
+        logger.info("    Match mode:  %s", self._match_mode_line())
 
         if self._atomization_service is not None:
             logger.info("    Atomicity:   %s", self._atomizer_model)

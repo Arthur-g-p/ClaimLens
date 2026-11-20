@@ -736,3 +736,22 @@ class TestClaimLevelResumption:
 
         # The retired root-level parallel list is never written
         assert "checker-model_checker_verdicts" not in items[0]
+
+
+class TestCountUnit:
+    """The 🔎 Checking tree names what one verdict counts: claims by default,
+    pairs for the extractor eval's joint and strict matching."""
+
+    def _tree(self, caplog, **kwargs):
+        import logging
+        with patch("claimlens.services.checking.Checker"):
+            service = CheckingService(model="m", extractor_model="e", **kwargs)
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            service._log_bl_results(4, 1, 2, 1, 1)
+        return caplog.text
+
+    def test_claims_by_default(self, caplog):
+        assert "🔎 Checking — 5 claims" in self._tree(caplog)
+
+    def test_pairs_when_asked(self, caplog):
+        assert "🔎 Checking — 5 pairs" in self._tree(caplog, count_unit="pairs")

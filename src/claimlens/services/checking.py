@@ -145,11 +145,16 @@ class CheckingService(BaseService):
         kg_key: str | None = None,
         verdict_namespace: str | None = None,
         extraction_error_key: str | None = None,
+        count_unit: str = "claims",
     ):
         """Defaults reproduce classic behavior: read {extractor_model}_response_kg,
         write {model}_checker_verdict/_explanation/_error. Pipelines override
         kg_key + verdict_namespace so multiple checking directions over the
         same triplets never collide (e.g. namespace "{model}_answer2response").
+
+        *count_unit* names what one verdict counts in the 🔎 Checking tree.
+        "claims" by default; the extractor eval's joint and strict matching
+        pass "pairs", where a claim gets one verdict per reference claim.
         """
         api_key = self._require_api_key(
             settings.CHECKER_API_KEY, "CHECKER_API_KEY"
@@ -159,6 +164,7 @@ class CheckingService(BaseService):
         self.base_url = base_url
         self.joint = joint
         self.joint_num = joint_num
+        self._count_unit = count_unit
         self._init_verbosity(verbosity, section_label)
         # max_words: default only applies in joint mode
         self.max_words = max_words if max_words is not None else (
@@ -657,7 +663,7 @@ class CheckingService(BaseService):
         """Print the 🔎 Checking tree: every issued claim lands in exactly
         one branch, null verdicts included."""
         log_mece_tree(
-            "🔎 Checking", judged + unjudged, "claims",
+            "🔎 Checking", judged + unjudged, self._count_unit,
             [
                 ("🟢", entailment, "Entailment", None),
                 ("🔴", contradiction, "Contradiction", None),

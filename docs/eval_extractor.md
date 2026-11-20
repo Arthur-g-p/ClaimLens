@@ -26,12 +26,13 @@ its prompt before reading any number.
 | --- | --- |
 | prompt | `claim_match_prompt` in the prompt map, `src/claimlens/prompt_map.json`. Its twin `claim_match_prompt_plain` is sent only to a model that accepts no `response_format` |
 | both directions | the **same** prompt for pass 1 and pass 2 |
+| rule | one-to-one: one claim of the other side must make the claim true on its own; several taken together never count. The explanation names that claim |
 | roles in the prompt | none: the prompt speaks of "one triplet (the Claim)" and "a list of other triplets (the Reference)", since the same words serve both passes |
-| one call | up to `--joint-num` claims (default 10) of one item, against the whole claim list of the other side. The bundle shrinks only when a call would pass the word budget (`DEFAULT_MAX_WORDS` 6,000 × 0.75) |
-| what the model reads | every triplet flattened to `subject predicate object`; the claims numbered `[1]`, `[2]`, …; the other side's list as `(R1)`, `(R2)`, … |
+| one call | set by `--match-mode` (see [The three modes](#the-three-modes)). `joint` (default): up to `--joint-num` claims (default 10) of one item against one reference claim. `strict`: one claim against one reference claim. `many-to-many`: up to `--joint-num` claims against the whole claim list of the other side. A bundle shrinks only when a call would pass the word budget (`DEFAULT_MAX_WORDS` 6,000 × 0.75) |
+| what the model reads | every triplet flattened to `subject predicate object`; the claims numbered `[1]`, `[2]`, …; the reference claims labelled with their real number in the other side's list, `(R1)`, `(R2)`, …, also when a call holds only one: the third is `(R3)` |
 | never sees | the response and the question |
 | answer per claim | an explanation, then `Entailment`, `Neutral` or `Contradiction` |
-| verdicts per item | one per GT claim (pass 1) plus one per predicted claim (pass 2) |
+| verdicts per item | `joint` and `strict`: one per pair (claim, reference claim), folded to one per claim. `many-to-many`: one per GT claim (pass 1) plus one per predicted claim (pass 2) |
 
 ---
 
@@ -49,7 +50,8 @@ Input (list[dict])
   │                   answer_missed, abstention_misread, extraction_error
   ├─ Match (LLM)   →  2-pass entailment check over the `to_compare` items:
   │                   _match_all_llm() builds synthetic items per pass
-  │                   (_build_pass_items) and runs `CheckingService` twice
+  │                   (_build_pass_items) and runs `CheckingService` twice;
+  │                   in joint/strict it folds the pairs (_fold_pairs)
   └─ Metrics       →  Precision / Recall / F1 + orthogonal axes + tooling rates
 ```
 
@@ -145,8 +147,9 @@ about the extractor's willingness to answer.
 
 ## Step 4: Matching (`_match_all_llm`)
 
-For `to_compare` items, two independent passes through `CheckingService` in
-`joint` mode with the `claim_match_prompt` prompt:
+For `to_compare` items, two independent passes through `CheckingService`, with
+the `claim_match_prompt` prompt in every match mode (the service's call with
+numbered claims; its single-claim call would send `checker_prompt`):
 
 1. **Pass 1 — GT → Pred (recall).** GT triplets are the claims, predictions are
    the reference. Entailment = the extractor found this fact.
@@ -155,28 +158,80 @@ For `to_compare` items, two independent passes through `CheckingService` in
 
 | pass | each claim of | judged against | question | counts for |
 | --- | --- | --- | --- | --- |
-| 1 | the GT | all predictions of the item | does the prediction list make this GT claim true? | recall |
-| 2 | the predictions | all GT claims of the item | does the GT list make this prediction true? | precision |
+| 1 | the GT | the predictions of the item | does one prediction make this GT claim true? | recall |
+| 2 | the predictions | the GT claims of the item | does one GT claim make this prediction true? | precision |
 
 Each pass is its own `CheckingService` run. `_build_pass_items` turns every
-compared item into a synthetic item for it: the claims side goes under a
-placeholder extraction key (`_exteval_response_kg`), the other side becomes one
-reference text of `(R1)`, `(R2)`, … lines. In pass 2 the two sides swap. This is
-reshaping only: nothing is extracted again, and no call is spent on it.
+compared item into synthetic items for it: the claims side goes under a
+placeholder extraction key (`_exteval_response_kg`), the other side becomes the
+reference text, one `(R1)`, `(R2)`, … line per claim. In `joint` and `strict`
+there is one synthetic item per (item, reference claim), with that one line as
+its reference; in `many-to-many` one per compared item, with the whole list as
+its reference. In pass 2 the two sides swap. This is reshaping only: nothing is
+extracted again, and no call is spent on it.
 
 Two passes, two independent counts — following RAGChecker, there is **no shared
 TP and no `min()`**. Each pass counts its own hits, and the two counts need not
 agree. Example: the GT holds three claims A, B and C; the extractor wrote one
-claim "A, B and C". Pass 1 finds each of A, B and C covered (recall 3 / 3);
-pass 2 finds the one prediction supported (precision 1 / 1). A shared TP would
-count matched pairs once for both ratios (here one pair, so recall 1 / 3); a
-`min()` would take the smaller of the two hit counts. Neither is done.
+claim "A, B and C". Pass 1 finds each of A, B and C covered, since the one
+prediction says each of them (recall 3 / 3); pass 2 finds no GT claim that says
+all of "A, B and C" on its own (precision 0 / 1). A shared TP would count matched
+pairs once for both ratios; a `min()` would take the smaller of the two hit
+counts. Neither is done.
 
-**Combining reference triplets.** The prompt's rule 2 lets several reference
-triplets together entail a claim ("Items the reference states separately entail
-a claim that joins them with 'and'"). Its closing instruction ("If the Claim is
-supported by ANY triplet in the Reference") reads as one triplet. In the example
-above, pass 1 needs one triplet per claim, pass 2 needs all three together.
+**One triplet must be enough.** A claim counts as found only when one triplet of
+the other side makes it true on its own; several triplets taken together never
+count, and the explanation names the triplet. So a claim that joins facts the
+other side states separately, or one that needs a neighbouring triplet to be
+read ("the league that season"), comes back as a miss. A claim that says less
+than one triplet is still found: "kills ants" in "kills ants, roaches and fleas".
+In `joint` and `strict` the matcher sees one reference claim per call, so it
+cannot combine claims.
+
+### The three modes
+
+`--match-mode` decides what one matcher call holds. Words: **the claim** is the
+claim being judged ("the Claim" in the prompt), **the reference claim** the claim
+of the other side that has to make it true ("the Reference"). For one item and
+one pass, with m claims to judge and n reference claims:
+
+| mode | one call holds | calls |
+| --- | --- | --- |
+| `joint` (default) | up to `--joint-num` claims (default 10), each judged against the same one reference claim | n × ⌈m / joint-num⌉ |
+| `strict` | one claim against one reference claim | m × n |
+| `many-to-many` | up to `--joint-num` claims against the whole list of reference claims | ⌈m / joint-num⌉ |
+
+A run costs the sum over its compared items and both passes: in pass 1 m is the
+item's GT claims and n its predictions, in pass 2 the other way round. `strict`
+costs 2 × m × n calls per item. Retry rounds add requests, not calls: the
+console's `tasks sent to LLM` is the formula's number, `HTTP requests` adds the
+retries.
+
+- **In `joint` the bundle is always on the side of the claims being judged**, in
+  both passes; the reference side always holds one claim. Several reference
+  claims in one call are what lets the matcher combine them.
+- **`strict` and `joint` ask the same pairs.** `joint` is the cheaper way to ask
+  them: the instructions are sent once per call, not once per pair.
+- **`many-to-many` is not one-to-one.** The matcher sees the whole list of
+  reference claims, so only the prompt keeps it from combining several claims
+  or from reading a claim with its neighbour. How much that changes the verdicts
+  is not measured yet.
+
+### The fold (`joint`, `strict`)
+
+Every pair (claim, reference claim) gets its own verdict. The claim's verdict is
+folded from its pairs, as ragcheck folds a claim's verdicts over its chunks, with
+`Contradiction` kept apart from `Neutral`:
+
+| the pairs of one claim | the claim's verdict |
+| --- | --- |
+| at least one pair is Entailment | `Entailment`: found, whatever the other pairs say, also when some pair has no verdict |
+| no Entailment, every pair has a verdict, at least one is Contradiction | `Contradiction` |
+| no Entailment, every pair has a verdict, none is Contradiction | `Neutral` |
+| no Entailment, and at least one pair has no verdict | no verdict (`null`): the claim is unjudged, never a miss |
+
+The scores, the buckets and the findings are computed from the folded verdicts
+exactly as in `many-to-many`: one folded verdict is one claim in the funnels below.
 
 ### Why the matcher never sees the response
 
@@ -248,7 +303,19 @@ either side is. A `0.0` therefore always means a real, measured zero.
 
 - `extraction_errors.rate` — items whose extraction failed / all extracted items
 - `checker_failures.rate` — verdicts the checker never returned / verdicts issued
-  (penalty claims were never sent, so they do not count as issued)
+  (penalty claims were never sent, so they do not count as issued). In `joint`
+  and `strict` a verdict here is a claim's folded verdict, not a pair's: a claim
+  is unjudged only when no pair found it and some pair has no verdict
+
+## Repeated runs extract again, on purpose
+
+With `--runs N`, every run extracts again and matches again; no run reuses an
+earlier run's predictions. With an extraction temperature above 0 the claims
+differ from run to run, and at 0 the provider's nondeterminism still makes them
+vary. That spread is the extractor's own behaviour and belongs to its score: a
+single run is one sample of it, and the mean over runs is the score to report.
+The spread also holds the matcher's noise, and this eval cannot tell the two
+apart.
 
 ---
 
@@ -276,9 +343,10 @@ claimlens eval extractor <input_file> [options]
 | **Atomizer Model** | `--atomizer-model` | `None` | Enables the atomicity axis. Needs `ATOMIZER_API_KEY`; silently skipped if unset. |
 | **Atomizer API Base** | `--atomizer-base-api` | `None` | Base URL for the atomizer. |
 | **Output File** | `--output`, `-o` | `results/{input_stem}_extractor_eval[_{runs}].json` | Summary JSON. The `_{runs}` suffix appears only for `--runs > 1`. A `*_findings.json` (the review queue) is written alongside. |
-| **Joint Bundle Size** | `--joint-num` | `10` | Max claims bundled per joint matching call. |
-| **Word Budget** | `--max-words` | `None` | Word budget per matching call. Unset, joint mode uses `DEFAULT_MAX_WORDS` (6,000), of which 75 % goes to the reference and the claims; a call over it gets fewer claims. |
-| **Runs** | `--runs` | `1` | Repeat the whole eval N times and report variance (N × LLM cost). |
+| **Match Mode** | `--match-mode` | `joint` | What one matcher call holds: `joint` (up to `--joint-num` claims against one reference claim), `strict` (one claim against one reference claim), `many-to-many` (up to `--joint-num` claims against the whole list of reference claims). `joint` and `strict` ask the same pairs and fold them; `many-to-many` is not one-to-one. See [The three modes](#the-three-modes). |
+| **Joint Bundle Size** | `--joint-num` | `10` | Max claims bundled per matching call in `joint` and `many-to-many`; `strict` sends one. |
+| **Word Budget** | `--max-words` | `None` | Word budget per matching call. Unset, a matching call uses `DEFAULT_MAX_WORDS` (6,000), of which 75 % goes to the reference and the claims; a call over it gets fewer claims. |
+| **Runs** | `--runs` | `1` | Repeat the whole eval N times and report variance (N × LLM cost). Every run extracts again (see Repeated runs). |
 | **Skip Marked** | `--skip-marked` | `None` | Leave out every item that carries this key, e.g. `cut`: not extracted, not matched, counted as `skipped_marked` in `counts.data`. The item stays in the input file. |
 | **Question If** | `--question-if` | `needs_question` | An item whose value under this key is `true` is extracted with its question, through `extractor_prompt_question`; every other item from its text alone. A marked item without a `question` is dropped (`dropped_no_question`). `""` turns it off. |
 | **Concurrency** | `--concurrency` | `10` | Max simultaneous LLM requests per client. |
@@ -341,7 +409,8 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
 ```json
 {
   "_args": { "...": "..." },
-  "_meta": { "...": "...", "pred_key": "gemini-3.1_response_kg", "matching": "llm-2-pass", "runs": 1 },
+  "_meta": { "...": "...", "pred_key": "gemini-3.1_response_kg", "matching": "llm-2-pass",
+             "match_mode": "joint", "joint_num": 10, "runs": 1 },
   "metrics": {
     "recall": 0.871, "precision": 0.991, "f1": 0.927,
     "atomicity_rate": 1.0, "claim_density": 1.0, "duplicate_rate": 0.0,
@@ -373,9 +442,9 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
           "gt_claims":   [ { "subject": "...", "predicate": "...", "object": "..." },
                            { "subject": "...", "predicate": "...", "object": "..." } ],
           "pred_claims": [ { "subject": "...", "predicate": "...", "object": "..." } ],
-          "pred2gt":     [ { "verdict": "Entailment", "explanation": "..." },
-                           { "verdict": "Neutral",    "explanation": "..." } ],
-          "gt2pred":     [ { "verdict": "Entailment", "explanation": "..." } ] },
+          "pred2gt":     [ { "verdict": "Entailment", "explanation": "...", "matched_by": [0], "pairs": [ ... ] },
+                           { "verdict": "Neutral",    "explanation": "...", "matched_by": [],  "pairs": [ ... ] } ],
+          "gt2pred":     [ { "verdict": "Entailment", "explanation": "...", "matched_by": [0], "pairs": [ ... ] } ] },
         { "id": "1088355", "question": "...", "response": "The passages do not provide ...",
           "bucket": "abstention_misread", "gt_claims": [],
           "pred_claims": [ { "subject": "...", "predicate": "...", "object": "..." } ] }
@@ -396,7 +465,8 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
   `answer_missed`, `abstention_recognized`, `abstention_misread`,
   `extraction_error`) and both claim lists as clean `{subject, predicate,
   object}`, the shape ragcheck writes. Compared items add the verdict cells
-  `{verdict, explanation}` (sparse `error`, `retry`) in two arrays parallel
+  `{verdict, explanation}` (sparse `error`, `retry`; `matched_by` and `pairs`
+  in `joint` and `strict`, see below) in two arrays parallel
   to the claims, named like ragcheck's directions, reference first:
   `pred2gt` (pass 1, GT claims against the predictions) and `gt2pred`
   (pass 2). The other buckets never reached the matcher, so they have none.
@@ -404,6 +474,51 @@ list, `metrics` is the mean over runs (the run's own values at N = 1), and
   wrote it.
   Split decisions (`atomicity_splits`) and `duplicate_claims` ride on the
   item they belong to; an errored item carries its `cause`.
+- `_meta.match_mode` names the mode, `_meta.joint_num` the claims per call
+  the run used (`1` in `strict`); the ⚙️ Config block prints both in its
+  `Match mode:` line, with the word budget in `joint` and `many-to-many`, where a
+  bundle can shrink:
+  `Match mode:  joint · up to 10 claims against one reference claim per call · 6000 max words`.
+
+#### The cells in `joint` and `strict`
+
+A cell keeps `{verdict, explanation}` (sparse `error`, `retry`) with the
+folded verdict, so every reader of `pred2gt` and `gt2pred` reads it as in
+`many-to-many`. It adds the pairs:
+
+```json
+"pred2gt": [
+  { "verdict": "Entailment", "explanation": "... R2 states the same ...",
+    "matched_by": [1],
+    "pairs": [ { "index": 0, "verdict": "Neutral",    "explanation": "..." },
+               { "index": 1, "verdict": "Entailment", "explanation": "... R2 states the same ..." } ] },
+  { "verdict": "Neutral", "explanation": "No single prediction makes the claim true (2 Neutral).",
+    "matched_by": [],
+    "pairs": [ { "index": 0, "verdict": "Neutral", "explanation": "..." },
+               { "index": 1, "verdict": "Neutral", "explanation": "..." } ] }
+]
+```
+
+- `pairs` — one entry per reference claim, in the order of the other side's
+  list: `index` is its position there, 0-based (in `pred2gt` an index into
+  `pred_claims`, in `gt2pred` into `gt_claims`), and the matcher saw it as
+  `R{index + 1}`: index 2 is `(R3)`. Then the pair's own `verdict` and
+  `explanation`, sparse `error` and `retry`, as a ragcheck matrix cell has.
+- `matched_by` — the indexes of the reference claims that made the claim true;
+  empty for a miss and for an unjudged claim.
+- `explanation` is always a string. For an Entailment it is the explanation of
+  the first pair that made the claim true; for a miss one sentence that no
+  single claim of the other side makes it true, with the count of the pair
+  verdicts; for an unjudged claim one sentence that says how many pairs gave
+  no verdict. The pairs carry the detail.
+- `error` (unjudged claims only) is the cause of the first pair without a
+  verdict. `retry` is the round of the pair whose explanation the cell
+  carries, so only an Entailment can have one; a miss is decided by every
+  pair, and each pair keeps its own round.
+
+The pairs of a run are one row each of (`pred`, `gt`, direction, verdict): in
+`pred2gt` the claim is a GT claim and the reference a prediction, in `gt2pred`
+the other way round.
 
 ### Findings — `<filename>_extractor_eval[_N]_findings.json`
 
@@ -439,6 +554,11 @@ item. Empty branches stay present — hidden is not zero.
   `{subject, predicate, object}`, not text as in ragcheck's findings: this
   queue is reviewed to repair the ground truth, and a missing claim goes in
   as the triplet the finding names.
+- `pairs` (`joint` and `strict`) — a `missed`, `unsupported` or `unjudged`
+  entry shows each reference claim with its verdict and explanation, so the
+  reviewer sees why no single claim matched:
+  `{ "index": 1, "reference_claim": { "subject": "...", ... }, "verdict": "Neutral", "explanation": "..." }`
+  (sparse `error`, `retry`). In `many-to-many` the entries have no `pairs`.
 - `unjudged` — a claim the checker never returned a verdict for (`side`
   names the pass). Not a disagreement, but the item stays traceable.
 - `answer_missed` / `abstention_misread` — the ⚪ Abstention Handling
@@ -455,6 +575,12 @@ never ran keeps its key with `n: 0`.
 ---
 
 ## Reading the console output
+
+Each matching pass prints its 🌐 API & Parsing block and its 🔎 Checking tree.
+`tasks sent to LLM` is the number of calls the mode's formula gives. In `joint`
+and `strict` the tree counts pairs (`🔎 Checking — 52 pairs`), one verdict per
+(claim, reference claim); the funnels below count claims, one folded verdict
+each.
 
 ```
  🔎 Matching Quality  (LLM 2-pass)

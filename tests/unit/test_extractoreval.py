@@ -729,7 +729,7 @@ class TestUnjudgedInFindings:
                             t["test-checker_checker_explanation"] = "e"
                 return items
 
-        ev = _evaluator()
+        ev = _evaluator(match_mode="many-to-many")
         item = _make_item(gt_triplets=[_make_canonical_triplet("a", "b", "c"),
                                        _make_canonical_triplet("bad", "x", "y")],
                           pred_triplets=[_make_canonical_triplet("a", "b", "c"),
@@ -1196,3 +1196,402 @@ class TestQuestionIfCli:
         from typer.testing import CliRunner
         from claimlens.cli import app
         assert "--question-if" not in CliRunner().invoke(app, [command, "--help"], terminal_width=200).output
+
+
+# ── Match modes: joint / strict / many-to-many ───────────────────────────────────────
+#
+# The fake worker stands in for the matcher at the worker boundary, so the
+# real CheckingService cuts the calls: what a test counts is what would be
+# sent. A claim is entailed by a reference line that contains its text;
+# subject "neg" is contradicted, subject "bad" gets no verdict, the rest is
+# Neutral.
+
+from claimlens.eval.extractoreval import MATCH_MODES, DEFAULT_MATCH_MODE  # noqa: E402
+from claimlens.workers.checker import ClaimVerdict, Verdict  # noqa: E402
+
+
+class _FakeChecker:
+    batches: list = []
+
+    def __init__(self, **kwargs):
+        self.last_stats = None
+
+    async def check_joint_batch(self, chunks, extra_vars_list=None, description=None):
+        _FakeChecker.batches.append(chunks)
+        out = []
+        for numbered, reference in chunks:
+            ref = "\n".join(reference)
+            verdicts = {}
+            for cid, text in numbered:
+                if text.startswith("bad "):
+                    verdicts[cid] = ClaimVerdict(verdict=None, error="parse_failure")
+                elif any(line.endswith(") " + text) for line in ref.split("\n")):
+                    verdicts[cid] = ClaimVerdict(verdict=Verdict.ENTAILMENT,
+                                                 explanation=f"same as {ref.split(' ')[0]}")
+                elif text.startswith("neg "):
+                    verdicts[cid] = ClaimVerdict(verdict=Verdict.CONTRADICTION,
+                                                 explanation="opposite")
+                else:
+                    verdicts[cid] = ClaimVerdict(verdict=Verdict.NEUTRAL, explanation="absent")
+            out.append(verdicts)
+        return out
+
+
+def _T(s, p="p", o="o"):
+    return {"subject": s, "predicate": p, "object": o}
+
+
+@pytest.fixture
+def fake_checker():
+    _FakeChecker.batches = []
+    with patch("claimlens.services.checking.Checker", _FakeChecker):
+        yield _FakeChecker
+
+
+def _mode_item(gt, pred, item_id="i1"):
+    return _make_item(gt_triplets=[dict(t) for t in gt],
+                      pred_triplets=[dict(t) for t in pred], item_id=item_id)
+
+
+class TestMatchModeOption:
+
+    def test_default_is_joint(self):
+        assert DEFAULT_MATCH_MODE == "joint"
+        assert _evaluator()._match_mode == "joint"
+
+    def test_the_three_modes(self):
+        assert MATCH_MODES == ("joint", "strict", "many-to-many")
+        for mode in MATCH_MODES:
+            assert _evaluator(match_mode=mode)._match_mode == mode
+
+    def test_unknown_mode_fails_fast(self):
+        with pytest.raises(InvalidInputError, match="match_mode"):
+            _evaluator(match_mode="pairs")
+
+    def test_list_is_no_mode(self):
+        with pytest.raises(InvalidInputError, match="match_mode"):
+            _evaluator(match_mode="list")
+
+
+class TestCallsPerMode:
+    """The calls built for one answer: which claims, which reference claim,
+    how many calls. m = 3 claims judged against n = 2 reference claims in
+    pass 1, the other way round in pass 2; joint_num = 2."""
+
+    GT = [_T("g1"), _T("g2"), _T("g3")]
+    PRED = [_T("p1"), _T("p2")]
+
+    async def _passes(self, mode):
+        ev = _evaluator(match_mode=mode, joint_num=2)
+        await ev._match_all_llm([_mode_item(self.GT, self.PRED)])
+        assert len(_FakeChecker.batches) == 2  # one batch per pass
+        return _FakeChecker.batches
+
+    async def test_many_to_many_sends_the_whole_reference_list(self, fake_checker):
+        p1, p2 = await self._passes("many-to-many")
+        # ⌈m / joint-num⌉ calls, each against the whole reference list
+        assert [[c for c, _ in n] for n, _ in p1] == [[1, 2], [1]]
+        assert [r for _, r in p1] == [["(R1) p1 p o\n(R2) p2 p o"]] * 2
+        assert [[t for _, t in n] for n, _ in p1] == [["g1 p o", "g2 p o"], ["g3 p o"]]
+        assert len(p2) == 1
+        assert p2[0][1] == ["(R1) g1 p o\n(R2) g2 p o\n(R3) g3 p o"]
+
+    async def test_joint_bundles_claims_against_one_reference_claim(self, fake_checker):
+        p1, p2 = await self._passes("joint")
+        # pass 1: n × ⌈m / joint-num⌉ = 2 × 2 calls
+        assert [([t for _, t in n], r) for n, r in p1] == [
+            (["g1 p o", "g2 p o"], ["(R1) p1 p o"]),
+            (["g3 p o"], ["(R1) p1 p o"]),
+            (["g1 p o", "g2 p o"], ["(R2) p2 p o"]),
+            (["g3 p o"], ["(R2) p2 p o"]),
+        ]
+        # pass 2: the bundle is on the side being judged again, 3 × ⌈2 / 2⌉
+        assert [([t for _, t in n], r) for n, r in p2] == [
+            (["p1 p o", "p2 p o"], ["(R1) g1 p o"]),
+            (["p1 p o", "p2 p o"], ["(R2) g2 p o"]),
+            (["p1 p o", "p2 p o"], ["(R3) g3 p o"]),
+        ]
+
+    async def test_strict_is_one_claim_against_one_reference_claim(self, fake_checker):
+        p1, p2 = await self._passes("strict")
+        assert len(p1) == 3 * 2 and len(p2) == 2 * 3   # m × n per pass
+        assert all(len(n) == 1 and len(r) == 1 and "\n" not in r[0] for n, r in p1 + p2)
+        assert sorted((n[0][1], r[0]) for n, r in p1) == sorted(
+            (f"g{j} p o", f"(R{k}) p{k} p o") for j in (1, 2, 3) for k in (1, 2))
+
+    async def test_joint_and_strict_ask_the_same_pairs(self, fake_checker):
+        def pairs(batches):
+            return sorted((t, r[0]) for p in batches for n, r in p for _, t in n)
+        joint = pairs(await self._passes("joint"))
+        _FakeChecker.batches = []
+        strict = pairs(await self._passes("strict"))
+        assert joint == strict and len(joint) == 2 * 3 * 2
+
+    @pytest.mark.parametrize("m, n, joint_num", [(1, 1, 10), (4, 3, 10), (11, 2, 10), (5, 4, 2)])
+    async def test_call_counts_follow_the_formulas(self, fake_checker, m, n, joint_num):
+        from math import ceil
+        gt = [_T(f"g{j}") for j in range(m)]
+        pred = [_T(f"p{k}") for k in range(n)]
+        expected = {
+            "strict": (m * n, n * m),
+            "joint": (n * ceil(m / joint_num), m * ceil(n / joint_num)),
+            "many-to-many": (ceil(m / joint_num), ceil(n / joint_num)),
+        }
+        for mode, calls in expected.items():
+            _FakeChecker.batches = []
+            ev = _evaluator(match_mode=mode, joint_num=joint_num)
+            await ev._match_all_llm([_mode_item(gt, pred)])
+            assert tuple(len(b) for b in _FakeChecker.batches) == calls, mode
+
+
+class TestFoldPairs:
+    """Every row of the fold table (docs/eval_extractor.md)."""
+
+    @staticmethod
+    def _pair(index, verdict, explanation="e", **extra):
+        return {"index": index, "verdict": verdict, "explanation": explanation, **extra}
+
+    def fold(self, *pairs):
+        return ExtractorEvaluator._fold_pairs(list(pairs), "prediction")
+
+    def test_one_entailment_is_found_whatever_the_others_say(self):
+        cell = self.fold(self._pair(0, "Neutral"), self._pair(1, "Entailment", "R2 says it"),
+                         self._pair(2, "Contradiction"))
+        assert cell["verdict"] == "Entailment"
+        assert cell["explanation"] == "R2 says it"
+        assert cell["matched_by"] == [1]
+        assert "error" not in cell
+
+    def test_entailment_also_when_a_pair_has_no_verdict(self):
+        cell = self.fold(self._pair(0, None, None, error="timeout"), self._pair(1, "Entailment"))
+        assert cell["verdict"] == "Entailment" and cell["matched_by"] == [1]
+        assert "error" not in cell
+
+    def test_every_entailing_reference_claim_is_named(self):
+        cell = self.fold(self._pair(0, "Entailment", "first"), self._pair(1, "Neutral"),
+                         self._pair(2, "Entailment", "second"))
+        assert cell["matched_by"] == [0, 2]
+        assert cell["explanation"] == "first"
+
+    def test_contradiction_when_all_judged_and_one_contradicts(self):
+        cell = self.fold(self._pair(0, "Neutral"), self._pair(1, "Contradiction"))
+        assert cell["verdict"] == "Contradiction"
+        assert cell["explanation"] == "No single prediction makes the claim true (1 Neutral, 1 Contradiction)."
+        assert cell["matched_by"] == []
+
+    def test_neutral_when_all_judged_and_none_contradicts(self):
+        cell = self.fold(self._pair(0, "Neutral"), self._pair(1, "Neutral"))
+        assert cell["verdict"] == "Neutral"
+        assert cell["explanation"] == "No single prediction makes the claim true (2 Neutral)."
+
+    def test_no_verdict_when_a_pair_has_none_and_nothing_entails(self):
+        cell = self.fold(self._pair(0, "Contradiction"), self._pair(1, None, None, error="timeout"))
+        assert cell["verdict"] is None          # unjudged, never a miss
+        assert cell["error"] == "timeout"
+        assert cell["explanation"] == ("No verdict: 1 of 2 pairs returned none, "
+                                       "and no other pair makes the claim true.")
+
+    def test_no_verdict_when_every_pair_failed(self):
+        cell = self.fold(self._pair(0, None, None, error="parse_failure"))
+        assert cell["verdict"] is None and cell["error"] == "parse_failure"
+        assert cell["explanation"] == "No verdict: no pair of the 1 returned one."
+
+    def test_explanation_is_always_a_string(self):
+        cell = self.fold(self._pair(3, "Entailment", None))
+        assert cell["explanation"] == "R4 makes the claim true."
+
+    def test_retry_follows_the_deciding_pair(self):
+        found = self.fold(self._pair(0, "Neutral", retry=2), self._pair(1, "Entailment", retry=1))
+        assert found["retry"] == 1
+        first_pass = self.fold(self._pair(0, "Entailment"), self._pair(1, "Neutral", retry=2))
+        assert "retry" not in first_pass
+        # a miss is decided by every pair: each keeps its own round
+        miss = self.fold(self._pair(0, "Neutral", retry=2), self._pair(1, "Neutral"))
+        assert "retry" not in miss and miss["pairs"][0]["retry"] == 2
+
+    def test_the_pairs_are_kept_in_reference_order(self):
+        pairs = [self._pair(0, "Neutral"), self._pair(1, "Entailment")]
+        assert self.fold(*pairs)["pairs"] == pairs
+
+
+class TestRecordPerMode:
+    """The record and findings of one answer, run end to end through the
+    evaluator with the fake worker: cells, pairs, findings, _meta."""
+
+    GT = [_T("a"), _T("neg"), _T("bad"), _T("c")]
+    PRED = [_T("a"), _T("z")]
+
+    def _run(self, mode, **kwargs):
+        ev = _evaluator(match_mode=mode, **kwargs)
+
+        async def extract(items):
+            for item in items:
+                item[PRED_KEY] = [dict(t) for t in self.PRED]
+        ev._extraction_service.run = AsyncMock(side_effect=extract)
+        data = [_make_item(gt_triplets=[dict(t) for t in self.GT], item_id="x")]
+        with patch("claimlens.services.checking.Checker", _FakeChecker):
+            return ev.run_sync(data)
+
+    @pytest.mark.parametrize("mode", ["joint", "strict"])
+    def test_cells_carry_their_pairs(self, mode):
+        record, _ = self._run(mode)
+        [item] = record["runs"][0]["items"]
+        # parallel to the claims, as in many-to-many
+        assert len(item["pred2gt"]) == len(item["gt_claims"]) == 4
+        assert len(item["gt2pred"]) == len(item["pred_claims"]) == 2
+        found, contradicted, unjudged, neutral = item["pred2gt"]
+        assert found == {
+            "verdict": "Entailment", "explanation": "same as (R1)", "matched_by": [0],
+            "pairs": [{"index": 0, "verdict": "Entailment", "explanation": "same as (R1)"},
+                      {"index": 1, "verdict": "Neutral", "explanation": "absent"}]}
+        assert contradicted["verdict"] == "Contradiction"
+        assert contradicted["explanation"] == ("No single prediction makes the claim true "
+                                               "(2 Contradiction).")
+        assert unjudged["verdict"] is None and unjudged["error"] == "parse_failure"
+        assert neutral["verdict"] == "Neutral" and neutral["matched_by"] == []
+        assert [p["index"] for p in neutral["pairs"]] == [0, 1]
+        # pass 2: a prediction is judged against each ground-truth claim
+        assert [len(c["pairs"]) for c in item["gt2pred"]] == [4, 4]
+        assert item["gt2pred"][1]["explanation"] == ("No single ground-truth claim makes the "
+                                                     "claim true (4 Neutral).")
+
+    @pytest.mark.parametrize("mode", ["joint", "strict"])
+    def test_scores_come_from_the_folded_verdicts(self, mode):
+        record, _ = self._run(mode)
+        counts = record["runs"][0]["counts"]
+        assert counts["recall"] == {"total_gt_claims": 4, "covered": 1, "missed": 2,
+                                    "answer_missed_penalty": 0, "unjudged": 1, "denominator": 3}
+        assert counts["precision"]["supported"] == 1 and counts["precision"]["unsupported"] == 1
+        assert counts["reliability"]["matching_checker"]["issued"] == 6
+
+    @pytest.mark.parametrize("mode", ["joint", "strict"])
+    def test_findings_show_the_pairs(self, mode):
+        _, findings = self._run(mode)
+        f = findings["runs"][0]["findings"]
+        assert [e["claim"] for e in f["missed"]] == [_T("neg"), _T("c")]
+        neg = f["missed"][0]
+        assert neg["verdict"] == "Contradiction"
+        assert neg["pairs"] == [
+            {"index": 0, "reference_claim": _T("a"), "verdict": "Contradiction", "explanation": "opposite"},
+            {"index": 1, "reference_claim": _T("z"), "verdict": "Contradiction", "explanation": "opposite"}]
+        [unsupported] = f["unsupported"]
+        assert unsupported["claim"] == _T("z")
+        assert [p["reference_claim"] for p in unsupported["pairs"]] == self.GT
+        [unjudged] = f["unjudged"]
+        assert unjudged["cause"] == "parse_failure"
+        assert [p["error"] for p in unjudged["pairs"]] == ["parse_failure"] * 2
+        # what a finding is judged against is the same as in many-to-many
+        assert neg["gt_claims"] == self.GT and neg["pred_claims"] == self.PRED
+
+    @pytest.mark.parametrize("mode, joint_num", [("joint", 10), ("strict", 1), ("many-to-many", 10)])
+    def test_meta_names_the_mode(self, mode, joint_num):
+        record, findings = self._run(mode)
+        for doc in (record, findings):
+            assert doc["_meta"]["match_mode"] == mode
+            assert doc["_meta"]["joint_num"] == joint_num
+            assert doc["runs"][0]["_meta"]["match_mode"] == mode
+            assert doc["_meta"]["matching"] == "llm-2-pass"
+
+    def test_many_to_many_cells_are_the_services_own(self):
+        """many-to-many: no pairs, no matched_by — every cell the service's own
+        {verdict, explanation, error?}; findings without pairs."""
+        record, findings = self._run("many-to-many")
+        [item] = record["runs"][0]["items"]
+        assert item["pred2gt"] == [
+            {"verdict": "Entailment", "explanation": "same as (R1)"},
+            {"verdict": "Contradiction", "explanation": "opposite"},
+            {"verdict": None, "explanation": None, "error": "parse_failure"},
+            {"verdict": "Neutral", "explanation": "absent"},
+        ]
+        assert item["gt2pred"] == [
+            {"verdict": "Entailment", "explanation": "same as (R1)"},
+            {"verdict": "Neutral", "explanation": "absent"},
+        ]
+        f = findings["runs"][0]["findings"]
+        assert not any("pairs" in e for branch in f.values() for e in branch)
+        assert record["runs"][0]["counts"]["recall"]["covered"] == 1
+
+    def test_item_keys_are_the_same_in_every_mode(self):
+        """An item has the same keys in every mode, and every cell of
+        pred2gt and gt2pred keeps verdict and explanation."""
+        item_keys = {"id", "question", "response", "bucket", "gt_claims", "pred_claims",
+                     "pred2gt", "gt2pred"}
+        for mode in MATCH_MODES:
+            record, _ = self._run(mode)
+            [item] = record["runs"][0]["items"]
+            assert set(item) == item_keys
+            for cells in (item["pred2gt"], item["gt2pred"]):
+                assert all({"verdict", "explanation"} <= set(c) for c in cells)
+                assert all(isinstance(c["explanation"], str) for c in cells
+                           if mode != "many-to-many")
+
+    def test_config_prints_the_mode(self, caplog):
+        import logging
+        for mode, line in [
+                ("many-to-many", "    Match mode:  many-to-many · up to 10 claims against the "
+                                 "whole list of reference claims per call · 6000 max words\n"),
+                ("joint", "    Match mode:  joint · up to 10 claims against one reference claim "
+                          "per call · 6000 max words\n"),
+                ("strict", "    Match mode:  strict · one claim against one reference claim "
+                           "per call\n")]:
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger="claimlens"):
+                _evaluator(match_mode=mode)._log_eval_config([])
+            assert line in caplog.text + "\n", mode
+            # "joint" names the match mode only: no service Mode: line
+            assert "    Mode:" not in caplog.text, mode
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="claimlens"):
+            _evaluator(match_mode="joint", max_words=3000)._log_eval_config([])
+        assert "per call · 3000 max words" in caplog.text
+
+
+class TestMatchModeCli:
+
+    def _invoke(self, tmp_path, monkeypatch, *extra):
+        import json
+        from typer.testing import CliRunner
+        from claimlens.cli import app
+        seen = {}
+
+        class _Built:
+            def __init__(self, **kwargs):
+                seen.update(kwargs)
+
+            def run_sync(self, data):
+                return {"_meta": {}}, {"_meta": {}}
+
+        monkeypatch.setattr("claimlens.eval.extractoreval.ExtractorEvaluator", _Built)
+        src = tmp_path / "d.json"
+        src.write_text(json.dumps([{"response": "r"}]))
+        CliRunner().invoke(app, ["eval", "extractor", str(src), "-e", "e", "--checker-model",
+                                 "c", "-o", str(tmp_path / "o.json"), *extra])
+        return seen
+
+    def test_default_is_joint(self, tmp_path, monkeypatch):
+        assert self._invoke(tmp_path, monkeypatch)["match_mode"] == "joint"
+
+    @pytest.mark.parametrize("mode", ["joint", "strict", "many-to-many"])
+    def test_passed_through(self, tmp_path, monkeypatch, mode):
+        assert self._invoke(tmp_path, monkeypatch, "--match-mode", mode)["match_mode"] == mode
+
+    def test_unknown_mode_exits_with_an_error(self, tmp_path):
+        import json
+        from typer.testing import CliRunner
+        from claimlens.cli import app
+        src = tmp_path / "d.json"
+        src.write_text(json.dumps([{"response": "r", "claude2_response_kg": []}]))
+        result = CliRunner().invoke(app, ["eval", "extractor", str(src), "-e", "e",
+                                          "--checker-model", "c", "--match-mode", "pairs",
+                                          "-o", str(tmp_path / "o.json")])
+        assert result.exit_code == 1
+        assert not (tmp_path / "o.json").exists()
+
+    @pytest.mark.parametrize("command", ["check", "refcheck", "ragcheck", "faithcheck",
+                                         "compare", ["eval", "checker"]])
+    def test_other_commands_have_no_option(self, command):
+        from typer.testing import CliRunner
+        from claimlens.cli import app
+        args = command if isinstance(command, list) else [command]
+        assert "--match-mode" not in CliRunner().invoke(
+            app, [*args, "--help"], terminal_width=200).output

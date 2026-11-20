@@ -755,7 +755,16 @@ def eval_extractor(
     ),
     joint_num: int = typer.Option(
         settings.DEFAULT_JOINT_NUM, "--joint-num",
-        help="Max claims per joint LLM call.",
+        help="Max claims per matcher call in joint and many-to-many. strict sends one.",
+    ),
+    match_mode: str = typer.Option(
+        "joint", "--match-mode",
+        help=("What one matcher call holds. joint: up to --joint-num claims against one "
+              "reference claim. strict: one claim against one reference claim. "
+              "many-to-many: up to --joint-num claims against the whole list of reference "
+              "claims. joint and strict ask the same pairs and fold them: a claim is found "
+              "when one single reference claim makes it true. many-to-many is not "
+              "one-to-one. Default: joint."),
     ),
     max_words: int = typer.Option(
         None, "--max-words", help="Word budget per call.",
@@ -814,6 +823,7 @@ def eval_extractor(
             checker_model=checker_model,
             checker_base_url=checker_base_api,
             joint_num=joint_num,
+            match_mode=match_mode,
             max_words=max_words,
             atomizer_model=atomizer_model,
             atomizer_base_url=atomizer_base_api,
